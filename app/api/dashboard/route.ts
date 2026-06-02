@@ -1,5 +1,6 @@
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { istDateString, shiftDateString } from '@/lib/date'
 
 export async function GET(req: Request) {
   try {
@@ -40,10 +41,8 @@ export async function GET(req: Request) {
       if (!prevDateStr) {
         currentLongest = 1
       } else {
-        const prevDate = new Date(prevDateStr)
-        prevDate.setDate(prevDate.getDate() - 1)
-        const expectedDateStr = prevDate.toISOString().split('T')[0]
-        
+        const expectedDateStr = shiftDateString(prevDateStr, -1)
+
         if (log.debrief_date === expectedDateStr) {
           currentLongest++
         } else if (log.debrief_date !== prevDateStr) {
@@ -56,10 +55,8 @@ export async function GET(req: Request) {
       }
     }
 
-    const todayStr = new Date().toISOString().split('T')[0]
-    const yesterday = new Date()
-    yesterday.setDate(yesterday.getDate() - 1)
-    const yesterdayStr = yesterday.toISOString().split('T')[0]
+    const todayStr = istDateString()
+    const yesterdayStr = shiftDateString(todayStr, -1)
 
     let dStreak = 0
     let hStreak = 0
@@ -69,18 +66,18 @@ export async function GET(req: Request) {
       const mostRecentDate = validLogs[0].debrief_date
       // Start counting streak only if the most recent log is from today or yesterday
       if (mostRecentDate === todayStr || mostRecentDate === yesterdayStr) {
-        let dateCursor = new Date(mostRecentDate)
+        let cursorDateStr: string = mostRecentDate
         let hBroken = false
         let cBroken = false
         let logIndex = 0
 
         while (logIndex < validLogs.length) {
-          const targetDateStr = dateCursor.toISOString().split('T')[0]
+          const targetDateStr = cursorDateStr
           const log = validLogs[logIndex]
 
           if (log.debrief_date === targetDateStr) {
             dStreak++
-            
+
             if (!hBroken && (log.hydration_litres ?? 0) >= 2.0) {
               hStreak++
             } else {
@@ -93,9 +90,9 @@ export async function GET(req: Request) {
               cBroken = true
             }
 
-            dateCursor.setDate(dateCursor.getDate() - 1)
+            cursorDateStr = shiftDateString(cursorDateStr, -1)
             logIndex++
-            
+
             // Skip duplicates if any
             while (logIndex < validLogs.length && validLogs[logIndex].debrief_date === targetDateStr) {
                logIndex++
@@ -111,6 +108,9 @@ export async function GET(req: Request) {
       }
     }
 
+    const debriefedToday =
+      validLogs.length > 0 && validLogs[0].debrief_date === todayStr
+
     const todaysPriority = validLogs.length > 0 ? validLogs[0].tomorrow_priority : null
 
     const last7DaysLogs = validLogs.slice(0, 7).reverse()
@@ -119,8 +119,11 @@ export async function GET(req: Request) {
       score: log.score_overall ?? 0
     }))
 
-    const weeklyAverage = recentScores.length > 0 
-      ? Math.round((recentScores.reduce((acc, curr) => acc + curr.score, 0) / recentScores.length) * 10) / 10 
+    // Average only days that actually produced a score, so a debrief logged
+    // without an inferred score doesn't drag the average down to zero.
+    const scoredLogs = last7DaysLogs.filter(log => log.score_overall != null)
+    const weeklyAverage = scoredLogs.length > 0
+      ? Math.round((scoredLogs.reduce((acc, log) => acc + (log.score_overall ?? 0), 0) / scoredLogs.length) * 10) / 10
       : 0
 
     return Response.json({
@@ -134,7 +137,8 @@ export async function GET(req: Request) {
       todaysPriority,
       openCommitments,
       totalDebriefs: validLogs.length,
-      longestStreak
+      longestStreak,
+      debriefedToday
     })
 
   } catch (error) {

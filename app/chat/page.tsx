@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useUser, UserButton } from '@clerk/nextjs'
 import {
   SendHorizontal,
@@ -15,7 +15,7 @@ import {
 import { cn } from '@/lib/utils'
 
 type MessageRole = 'user' | 'assistant'
-type SessionMode = 'open_chat' | 'debrief'
+type SessionMode = 'open_chat' | 'debrief' | 'morning'
 
 type Message = {
   role: MessageRole
@@ -106,14 +106,21 @@ function TypingIndicator() {
   )
 }
 
-export default function ChatPage() {
+function ChatPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { isLoaded, user } = useUser()
 
   // Chat state
   const [messages, setMessages] = useState<Message[]>([])
   const [sessionId, setSessionId] = useState('')
-  const [mode, setMode] = useState<SessionMode>('open_chat')
+  // Honor ?mode= from push notifications and dashboard CTAs.
+  const [mode, setMode] = useState<SessionMode>(() => {
+    const m = searchParams.get('mode')
+    if (m === 'debrief') return 'debrief'
+    if (m === 'morning') return 'morning'
+    return 'open_chat'
+  })
   const [isLoading, setIsLoading] = useState(false)
   const [input, setInput] = useState('')
 
@@ -536,7 +543,9 @@ export default function ChatPage() {
               )}
             </button>
             <h1 className="text-sm font-semibold tracking-tight text-zinc-100">
-              {mode === 'debrief' ? 'Nightly Debrief' : 'Open Chat'}
+              {mode === 'debrief' ? 'Nightly Debrief'
+                : mode === 'morning' ? 'Morning Planning'
+                : 'Open Chat'}
             </h1>
           </div>
 
@@ -590,11 +599,18 @@ export default function ChatPage() {
         <main className="flex-1 overflow-y-auto px-4 py-6">
           <div className="mx-auto flex max-w-2xl flex-col gap-4">
             {messages.length === 0 && !isLoading && !loadingSession && (
-              <p className="text-center text-sm text-zinc-500 pt-8">
-                {mode === 'debrief'
-                  ? 'Ready for your nightly debrief. How did today go?'
-                  : "What's on your mind?"}
-              </p>
+              mode === 'morning' ? (
+                <div className="text-center pt-8">
+                  <p className="text-sm text-zinc-300">Good morning.</p>
+                  <p className="text-xs text-zinc-500 mt-1">Let&apos;s set the intention for today.</p>
+                </div>
+              ) : (
+                <p className="text-center text-sm text-zinc-500 pt-8">
+                  {mode === 'debrief'
+                    ? 'Ready for your nightly debrief. How did today go?'
+                    : "What's on your mind?"}
+                </p>
+              )
             )}
 
             {messages.map((msg, index) => (
@@ -631,10 +647,11 @@ export default function ChatPage() {
         {/* Input footer */}
         <footer className="shrink-0 border-t border-zinc-800/60 bg-[#0a0a0f] px-4 pb-4 pt-3">
           <div className="mx-auto max-w-2xl">
-            {mode === 'debrief' && (
+            {(mode === 'debrief' || mode === 'morning') && (
               <p className="mb-2 text-center text-xs text-zinc-600">
-                Structured session — your mentor will guide tonight&apos;s
-                debrief
+                {mode === 'debrief'
+                  ? "Structured session — your mentor will guide tonight\u2019s debrief"
+                  : 'Morning planning — keep it short and focused'}
               </p>
             )}
             <div className="flex items-end gap-2 rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-2">
@@ -646,7 +663,9 @@ export default function ChatPage() {
                 placeholder={
                   mode === 'debrief'
                     ? 'Share how your day went...'
-                    : 'Message your mentor...'
+                    : mode === 'morning'
+                      ? "What's on your mind this morning..."
+                      : 'Message your mentor...'
                 }
                 disabled={inputDisabled}
                 rows={1}
@@ -675,5 +694,19 @@ export default function ChatPage() {
         </footer>
       </div>
     </div>
+  )
+}
+
+export default function ChatPageWrapper() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-dvh items-center justify-center bg-[#0a0a0f] text-zinc-500">
+          Loading…
+        </div>
+      }
+    >
+      <ChatPage />
+    </Suspense>
   )
 }

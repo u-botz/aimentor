@@ -6,9 +6,9 @@ import {
   type OpenCommitment,
   type LastSession,
 } from './layer3-memory'
-import { OPEN_CHAT_PROMPT, DEBRIEF_PROMPT } from './layer4-mode'
+import { OPEN_CHAT_PROMPT, DEBRIEF_PROMPT, MORNING_MODE_PROMPT } from './layer4-mode'
 
-export type SessionMode = 'open_chat' | 'debrief'
+export type SessionMode = 'open_chat' | 'debrief' | 'morning'
 
 export type PromptContext = {
   user: UserProfile
@@ -34,7 +34,10 @@ export function assembleSystemPrompt(ctx: PromptContext): string {
   const layer1 = BASE_MENTOR_PROMPT
   const layer2 = buildUserLayer(ctx.user)
   const layer3 = buildMemoryLayer(ctx.memory, ctx.lastSession, ctx.openCommitments)
-  const layer4 = ctx.mode === 'debrief' ? DEBRIEF_PROMPT : OPEN_CHAT_PROMPT
+  const layer4 =
+    ctx.mode === 'debrief' ? DEBRIEF_PROMPT
+    : ctx.mode === 'morning' ? MORNING_MODE_PROMPT
+    : OPEN_CHAT_PROMPT
 
   return [timeContext, layer1, layer2, layer3, layer4].join('\n\n---\n\n')
 }

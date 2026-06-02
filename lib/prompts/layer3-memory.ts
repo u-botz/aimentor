@@ -14,6 +14,7 @@ export type LastSession = {
 export type OpenCommitment = {
   commitment: string
   made_on: string
+  due_date?: string | null
 }
 
 export function buildMemoryLayer(
@@ -38,12 +39,23 @@ Be warm. Establish your character early. Ask what's on their mind.
     ? memory.identity_strengths.map((s) => `- ${s}`).join('\n')
     : '- Still learning'
 
+  const todayIST = new Date().toLocaleDateString('en-CA', {
+    timeZone: 'Asia/Kolkata',
+  })
+
   const commitmentText = openCommitments.length
     ? openCommitments
-        .map(
-          (c) =>
-            `- "${c.commitment}" (since ${new Date(c.made_on).toDateString()})`
-        )
+        .map((c) => {
+          const madeOn = c.made_on
+          const due = c.due_date ?? null
+          if (due && due < todayIST) {
+            return `- "${c.commitment}" — OVERDUE since ${due} (made on ${madeOn})`
+          }
+          if (due) {
+            return `- "${c.commitment}" — made on ${madeOn}, DUE ${due}`
+          }
+          return `- "${c.commitment}" — made on ${madeOn}`
+        })
         .join('\n')
     : '- None open'
 

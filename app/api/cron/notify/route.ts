@@ -1,5 +1,8 @@
 import webpush from 'web-push'
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { istDateString, shiftDateString } from '@/lib/date'
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function getCurrentTimeIST(): string {
   const formatter = new Intl.DateTimeFormat('en-GB', {
@@ -22,6 +25,21 @@ function isValidCronRequest(req: Request): boolean {
   return auth === `Bearer ${secret}`
 }
 
+type NotificationKind =
+  | 'morning'
+  | 'debrief'
+  | 'streak_broken'
+  | 'gone_quiet'
+  | 'commitment_due'
+
+interface Notification {
+  title: string
+  body: string
+  url: string
+}
+
+// ── Route ─────────────────────────────────────────────────────────────────────
+
 export async function GET(req: Request) {
   try {
     if (!isValidCronRequest(req)) {
@@ -29,20 +47,9 @@ export async function GET(req: Request) {
     }
 
     const currentTime = getCurrentTimeIST()
-
-    const { data: users, error: usersError } = await supabaseAdmin
-      .from('users')
-      .select('id')
-      .eq('reminder_time', currentTime)
-
-    if (usersError) {
-      console.error('Users query error:', usersError)
-      return new Response('DB error', { status: 500 })
-    }
-
-    const title = 'AI Mentor'
-    const body = `It's ${currentTime}. How did today actually go?`
-    const url = '/chat?mode=debrief'
+    const todayIST = istDateString()
+    const yesterdayIST = shiftDateString(todayIST, -1)
+    const cutoff48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
 
     webpush.setVapidDetails(
       process.env.VAPID_EMAIL!,
@@ -50,29 +57,175 @@ export async function GET(req: Request) {
       process.env.VAPID_PRIVATE_KEY!
     )
 
-    let notified = 0
-
-    for (const user of users ?? []) {
-      const { data: subRow } = await supabaseAdmin
-        .from('push_subscriptions')
-        .select('subscription')
-        .eq('user_id', user.id)
-        .single()
-
-      if (!subRow?.subscription) continue
-
-      try {
-        await webpush.sendNotification(
-          subRow.subscription as webpush.PushSubscription,
-          JSON.stringify({ title, body, url })
+    // 1. Fetch all users who have a push subscription
+    const { data: rows, error: rowsError } = await supabaseAdmin
+      .from('push_subscriptions')
+      .select(`
+        subscription,
+        users (
+          id,
+          reminder_time,
+          morning_time
         )
-        notified++
-      } catch (err) {
-        console.error('Push failed for user:', user.id, err)
+      `)
+
+    if (rowsError) {
+      console.error('push_subscriptions query error:', rowsError)
+      return new Response('DB error', { status: 500 })
+    }
+
+    // 2. For every user with a valid subscription, evaluate triggers
+    const fired: { user_id: string; kind: string }[] = []
+
+    for (const row of rows ?? []) {
+      const rawUser = row.users
+      const user = (Array.isArray(rawUser) ? rawUser[0] : rawUser) as {
+        id: string
+        reminder_time: string | null
+        morning_time: string | null
+      } | null
+
+      if (!user?.id || !row.subscription) continue
+
+      const userId = user.id
+      const subscription = row.subscription as webpush.PushSubscription
+
+      // Load today's notification_log for this user once
+      const { data: sentToday } = await supabaseAdmin
+        .from('notification_log')
+        .select('kind')
+        .eq('user_id', userId)
+        .eq('sent_date', todayIST)
+
+      const alreadySent = new Set((sentToday ?? []).map((r: { kind: string }) => r.kind))
+
+      const triggers: Array<{
+        kind: NotificationKind
+        condition: boolean
+        notification: Notification
+      }> = [
+        // ── TRIGGER A: morning ────────────────────────────────────────────────
+        {
+          kind: 'morning',
+          condition:
+            !!user.morning_time && currentTime === user.morning_time,
+          notification: {
+            title: 'AI Mentor',
+            body: "Good morning. What's the one thing that would make today count?",
+            url: '/chat?mode=morning',
+          },
+        },
+        // ── TRIGGER B: debrief ────────────────────────────────────────────────
+        {
+          kind: 'debrief',
+          condition:
+            !!user.reminder_time && currentTime === user.reminder_time,
+          notification: {
+            title: 'AI Mentor',
+            body: `It's ${currentTime}. How did today actually go?`,
+            url: '/chat?mode=debrief',
+          },
+        },
+        // ── TRIGGER C: streak_broken ─────────────────────────────────────────
+        // Fires at 09:00 when yesterday has no completed debrief_log row
+        {
+          kind: 'streak_broken',
+          condition: currentTime === '09:00',
+          notification: {
+            title: 'AI Mentor',
+            body: "You didn't check in last night. Your streak is on the line.",
+            url: '/chat?mode=debrief',
+          },
+        },
+        // ── TRIGGER D: gone_quiet ────────────────────────────────────────────
+        // Fires at 10:00 when user has no session in last 48 h
+        {
+          kind: 'gone_quiet',
+          condition: currentTime === '10:00',
+          notification: {
+            title: 'AI Mentor',
+            body: "You've gone quiet. That's usually when things slip.",
+            url: '/chat',
+          },
+        },
+        // ── TRIGGER E: commitment_due ─────────────────────────────────────────
+        // Fires at 09:00 when user has an open commitment due today
+        {
+          kind: 'commitment_due',
+          condition: currentTime === '09:00',
+          notification: {
+            title: 'AI Mentor',
+            body: '', // filled in after DB check below
+            url: '/chat',
+          },
+        },
+      ]
+
+      for (const trigger of triggers) {
+        if (!trigger.condition) continue
+        if (alreadySent.has(trigger.kind)) continue
+
+        // ── Extra DB checks for triggers that need them ────────────────────
+
+        if (trigger.kind === 'streak_broken') {
+          const { data: yesterdayLog } = await supabaseAdmin
+            .from('debrief_logs')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('debrief_date', yesterdayIST)
+            .eq('completed', true)
+            .maybeSingle()
+          if (yesterdayLog) continue // not broken — skip
+        }
+
+        if (trigger.kind === 'gone_quiet') {
+          const { data: recentSession } = await supabaseAdmin
+            .from('sessions')
+            .select('created_at')
+            .eq('user_id', userId)
+            .gt('created_at', cutoff48h)
+            .limit(1)
+            .maybeSingle()
+          if (recentSession) continue // active recently — skip
+        }
+
+        if (trigger.kind === 'commitment_due') {
+          const { data: dueToday } = await supabaseAdmin
+            .from('open_commitments')
+            .select('commitment')
+            .eq('user_id', userId)
+            .eq('status', 'open')
+            .eq('due_date', todayIST)
+            .limit(1)
+            .maybeSingle()
+          if (!dueToday) continue // nothing due today — skip
+          trigger.notification.body = `Today's the day you said you'd ${dueToday.commitment}. Did you?`
+        }
+
+        // ── Send push ────────────────────────────────────────────────────────
+
+        try {
+          await webpush.sendNotification(
+            subscription,
+            JSON.stringify(trigger.notification)
+          )
+        } catch (err) {
+          console.error(`Push failed — user ${userId} kind ${trigger.kind}:`, err)
+          continue
+        }
+
+        // ── Log to notification_log (upsert so concurrent cron runs are safe)
+
+        await supabaseAdmin.from('notification_log').upsert(
+          { user_id: userId, kind: trigger.kind, sent_date: todayIST },
+          { onConflict: 'user_id,kind,sent_date', ignoreDuplicates: true }
+        )
+
+        fired.push({ user_id: userId, kind: trigger.kind })
       }
     }
 
-    return Response.json({ success: true, notified })
+    return Response.json({ processed: (rows ?? []).length, fired })
   } catch (error) {
     console.error('Cron notify error:', error)
     return new Response('Internal server error', { status: 500 })

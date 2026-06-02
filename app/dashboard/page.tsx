@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 type DashboardData = {
@@ -16,6 +17,7 @@ type DashboardData = {
   openCommitments: { commitment: string; date: string }[]
   totalDebriefs: number
   longestStreak: number
+  debriefedToday: boolean
 }
 
 export default function DashboardPage() {
@@ -59,7 +61,7 @@ export default function DashboardPage() {
     )
   }
 
-  const { streaks, recentScores, weeklyAverage, todaysPriority, openCommitments } = data
+  const { streaks, recentScores, weeklyAverage, todaysPriority, openCommitments, debriefedToday } = data
 
   const getDayLabel = (dateStr: string) => {
     const d = new Date(dateStr)
@@ -70,7 +72,18 @@ export default function DashboardPage() {
     <div className="flex min-h-dvh flex-col bg-[#0a0a0f] text-zinc-100">
       <div className="mx-auto w-full max-w-[480px] flex-1 flex flex-col p-5">
         
-        <h1 className="text-2xl font-semibold tracking-tight mb-6 mt-2">Dashboard</h1>
+        <div className="mb-6 mt-2 flex items-center justify-between">
+          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <button
+            type="button"
+            onClick={() => router.push('/profile')}
+            aria-label="Edit profile"
+            className="flex items-center gap-1.5 rounded-lg border border-zinc-800 px-3 py-2 text-xs font-medium text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
+          >
+            <Settings className="h-3.5 w-3.5" />
+            Profile
+          </button>
+        </div>
         
         {/* Top row - Streaks */}
         <div className="grid grid-cols-3 gap-3 mb-8">
@@ -127,7 +140,7 @@ export default function DashboardPage() {
         {/* Below that - Two columns */}
         <div className="grid grid-cols-2 gap-4 mb-8 flex-1">
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 flex flex-col shadow-sm">
-            <h2 className="text-xs text-zinc-400 uppercase tracking-wider font-semibold mb-3">Today's Priority</h2>
+            <h2 className="text-xs text-zinc-400 uppercase tracking-wider font-semibold mb-3">Today&apos;s Priority</h2>
             <p className="text-sm text-zinc-200 leading-relaxed font-medium">
               {todaysPriority ? todaysPriority : "Complete tonight's debrief to set one."}
             </p>
@@ -151,13 +164,15 @@ export default function DashboardPage() {
 
         {/* Bottom CTA */}
         <button
-          onClick={() => router.push('/chat')}
+          onClick={() =>
+            router.push(debriefedToday ? '/chat' : '/chat?mode=debrief')
+          }
           className={cn(
             'w-full rounded-xl py-3.5 text-sm font-medium text-white transition-all mt-auto',
             'bg-[#2E5BFF] hover:bg-[#2548d4] shadow-md hover:shadow-lg focus:ring-2 focus:ring-[#2E5BFF]/50 outline-none'
           )}
         >
-          Start Tonight's Debrief
+          {debriefedToday ? 'Talk to Your Mentor' : "Start Tonight's Debrief"}
         </button>
       </div>
     </div>

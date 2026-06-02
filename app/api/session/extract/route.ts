@@ -1,6 +1,9 @@
 import { auth } from '@clerk/nextjs/server'
 import { streamChat } from '@/lib/model-router'
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { istDateString } from '@/lib/date'
+
+type SessionMode = 'open_chat' | 'debrief' | 'morning'
 
 type Structured = {
   score_overall: number | null
@@ -17,10 +20,15 @@ type Structured = {
   violation_detail: string | null
 }
 
+type CommitmentMade = {
+  text: string
+  due_date: string | null
+}
+
 type ExtractionResult = {
   new_pattern: string | null
   new_strength: string | null
-  commitments_made: string[]
+  commitments_made: CommitmentMade[]
   commitments_resolved: string[]
   carry_forward: string | null
   structured: Structured
@@ -31,8 +39,24 @@ type ChatMessage = { role: 'user' | 'assistant'; content: string }
 export async function runSessionExtraction(
   userId: string,
   sessionId: string,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  mode: SessionMode = 'debrief'
 ) {
+    // ── Step 1: Idempotency guard ──────────────────────────────────────────────
+    // A session can be extracted twice (e.g. abandoned-session sweep, then the
+    // user reopens it and hits "End Session"). debrief_logs is an upsert so it's
+    // safe, but commitments are plain inserts — guard against duplicates.
+    const { data: existingSummary } = await supabaseAdmin
+      .from('session_summaries')
+      .select('id')
+      .eq('session_id', sessionId)
+      .limit(1)
+      .maybeSingle()
+
+    if (existingSummary) {
+      return { skipped: true, reason: 'Already extracted' }
+    }
+
     // ── Step 2: Fetch current user memory state ────────────────────────────────
     const { data: userData } = await supabaseAdmin
       .from('users')
@@ -48,7 +72,8 @@ export async function runSessionExtraction(
       .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
       .join('\n')
 
-    const userPrompt = `CURRENT KNOWN PATTERNS: ${identity_patterns.length ? identity_patterns.join(', ') : 'none'}
+    const userPrompt = `TODAY'S DATE: ${istDateString()} (IST). Use this to resolve any relative deadlines into absolute YYYY-MM-DD dates.
+CURRENT KNOWN PATTERNS: ${identity_patterns.length ? identity_patterns.join(', ') : 'none'}
 CURRENT KNOWN STRENGTHS: ${identity_strengths.length ? identity_strengths.join(', ') : 'none'}
 
 CONVERSATION:
@@ -59,7 +84,7 @@ Answer these questions in JSON:
 {
   "new_pattern": "one short string if a NEW repeated tendency emerged that isn't already in known patterns, else null",
   "new_strength": "one short string if a strength was clearly demonstrated that isn't already known, else null",
-  "commitments_made": ["list of specific commitments the user made during this conversation, empty array if none"],
+  "commitments_made": [{"text": "a specific commitment the user made", "due_date": "YYYY-MM-DD if the user named or implied a deadline (e.g. 'by Friday', 'tomorrow', 'this week'), else null"}],
   "commitments_resolved": ["list of commitments that were explicitly marked done or closed, empty array if none"],
   "carry_forward": "one sentence — the single most important thing to remember from this conversation for future sessions",
   "structured": {
@@ -106,8 +131,32 @@ Answer these questions in JSON:
       throw new Error('JSON parse error')
     }
 
-    const today = new Date().toISOString().split('T')[0]
+    const today = istDateString()
     const s = extracted.structured ?? {}
+
+    // Guard duplicate commitment inserts if this session was already partially
+    // processed (belt-and-suspenders alongside the summary guard above).
+    const { data: existingCommitments } = await supabaseAdmin
+      .from('open_commitments')
+      .select('id')
+      .eq('session_id', sessionId)
+      .limit(1)
+    const commitmentsAlreadyInserted = (existingCommitments?.length ?? 0) > 0
+
+    // Normalize commitments_made — tolerate the model returning bare strings or
+    // objects, and drop anything without real text. due_date stays null unless a
+    // valid YYYY-MM-DD was produced.
+    const newCommitments = (extracted.commitments_made ?? [])
+      .map((c: unknown) => {
+        if (typeof c === 'string') return { text: c.trim(), due_date: null }
+        const obj = (c ?? {}) as Partial<CommitmentMade>
+        const due =
+          typeof obj.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(obj.due_date)
+            ? obj.due_date
+            : null
+        return { text: (obj.text ?? '').trim(), due_date: due }
+      })
+      .filter((c) => c.text.length > 0)
 
     // ── Step 5: Parallel DB updates ───────────────────────────────────────────
     // Wrap each supabase builder in Promise.resolve so TypeScript sees a real Promise
@@ -142,12 +191,13 @@ Answer these questions in JSON:
         : []),
 
       // d. Insert new commitments
-      ...(extracted.commitments_made?.length > 0
+      ...(newCommitments.length > 0 && !commitmentsAlreadyInserted
         ? [wrap(supabaseAdmin.from('open_commitments').insert(
-            extracted.commitments_made.map((commitment) => ({
+            newCommitments.map((c) => ({
               user_id: userId,
               session_id: sessionId,
-              commitment,
+              commitment: c.text,
+              due_date: c.due_date,
               made_on: today,
               status: 'open',
             }))
@@ -166,14 +216,17 @@ Answer these questions in JSON:
           )
         : []),
 
-      // f. Upsert debrief_logs if score_overall is present
-      ...(s.score_overall != null
+      // f. Upsert debrief_logs for debrief sessions.
+      // Always log a completed debrief — even if no numeric score was inferred —
+      // so the day still counts toward streaks and captures tomorrow's priority.
+      // Open chats never produce a debrief log.
+      ...(mode === 'debrief'
         ? [wrap(supabaseAdmin.from('debrief_logs').upsert(
             {
               user_id: userId,
               session_id: sessionId,
               debrief_date: today,
-              score_overall: s.score_overall,
+              score_overall: s.score_overall ?? null,
               hydration_litres: s.hydration_litres ?? null,
               sleep_hours: s.sleep_hours ?? null,
               dairy_violation: s.dairy_violation ?? false,
@@ -216,7 +269,18 @@ export async function POST(req: Request) {
       messages: ChatMessage[]
     }
 
-    const extracted = await runSessionExtraction(userId, sessionId, messages)
+    // Resolve the mode from the DB rather than trusting the client, so debrief
+    // logs are only written for genuine debrief sessions.
+    const { data: session } = await supabaseAdmin
+      .from('sessions')
+      .select('mode')
+      .eq('id', sessionId)
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    const mode: SessionMode = session?.mode === 'debrief' ? 'debrief' : 'open_chat'
+
+    const extracted = await runSessionExtraction(userId, sessionId, messages, mode)
     return Response.json({ success: true, extracted })
   } catch (error) {
     console.error('Extraction error:', error)

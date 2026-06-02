@@ -47,6 +47,7 @@ export default function OnboardingPage() {
   const [communicationStyle, setCommunicationStyle] =
     useState<CommunicationStyle>('Balanced')
   const [reminderTime, setReminderTime] = useState('22:00')
+  const [morningTime, setMorningTime] = useState('08:00')
 
   useEffect(() => {
     fetch('/api/user/sync', { method: 'POST' }).catch(console.error)
@@ -136,6 +137,7 @@ export default function OnboardingPage() {
           strictness,
           communication_style: communicationStyle,
           reminder_time: reminderTime,
+          morning_time: morningTime,
           onboarded: true,
         }),
       })
@@ -413,24 +415,36 @@ export default function OnboardingPage() {
             <div className="space-y-6">
               <div>
                 <h1 className="text-xl font-semibold tracking-tight">
-                  Reminder time
+                  Check-in times
                 </h1>
                 <p className="mt-1 text-sm text-zinc-500">
-                  When should your mentor check in for the nightly debrief?
+                  When should your mentor check in with you each day?
                 </p>
               </div>
               <label className="block space-y-2">
-                <span className="text-sm text-zinc-400">Debrief time</span>
+                <span className="text-sm text-zinc-400">Morning check-in time</span>
+                <input
+                  type="time"
+                  value={morningTime}
+                  onChange={(e) => setMorningTime(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF] [color-scheme:dark]"
+                />
+                <p className="text-xs text-zinc-600">
+                  When should I check in with you at the start of your day?
+                </p>
+              </label>
+              <label className="block space-y-2">
+                <span className="text-sm text-zinc-400">Nightly debrief time</span>
                 <input
                   type="time"
                   value={reminderTime}
                   onChange={(e) => setReminderTime(e.target.value)}
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF] [color-scheme:dark]"
                 />
+                <p className="text-xs text-zinc-600">
+                  When should your mentor check in for the nightly debrief?
+                </p>
               </label>
-              <p className="text-xs text-zinc-600">
-                Default: 10:00 PM — adjust to fit your schedule.
-              </p>
             </div>
           )}
         </div>

@@ -8,7 +8,9 @@ export async function GET() {
 
     const { data, error } = await supabaseAdmin
       .from('users')
-      .select('onboarded, reminder_time')
+      .select(
+        'onboarded, reminder_time, morning_time, name, age, role, primary_goal, non_negotiables, strictness, communication_style'
+      )
       .eq('id', userId)
       .maybeSingle()
 
@@ -20,6 +22,14 @@ export async function GET() {
     return Response.json({
       onboarded: data?.onboarded === true,
       reminder_time: data?.reminder_time ?? null,
+      morning_time: data?.morning_time ?? null,
+      name: data?.name ?? '',
+      age: data?.age ?? null,
+      role: data?.role ?? '',
+      primary_goal: data?.primary_goal ?? '',
+      non_negotiables: data?.non_negotiables ?? [],
+      strictness: data?.strictness ?? 3,
+      communication_style: data?.communication_style ?? 'Balanced',
     })
   } catch (error) {
     console.error('Profile GET error:', error)
@@ -32,7 +42,7 @@ export async function PATCH(req: Request) {
     const { userId } = await auth()
     if (!userId) return new Response('Unauthorized', { status: 401 })
 
-    const body = await req.json() as {
+    const body = (await req.json()) as Partial<{
       name: string
       age: number
       role: string
@@ -41,19 +51,32 @@ export async function PATCH(req: Request) {
       strictness: number
       communication_style: string
       reminder_time: string
+      morning_time: string
       onboarded: boolean
+    }>
+
+    // Only update the fields actually present in the request, so a profile edit
+    // that touches one section never nulls out the others.
+    const ALLOWED_FIELDS = [
+      'name',
+      'age',
+      'role',
+      'primary_goal',
+      'non_negotiables',
+      'strictness',
+      'communication_style',
+      'reminder_time',
+      'morning_time',
+      'onboarded',
+    ] as const
+
+    const profileFields: Record<string, unknown> = {}
+    for (const key of ALLOWED_FIELDS) {
+      if (body[key] !== undefined) profileFields[key] = body[key]
     }
 
-    const profileFields = {
-      name: body.name,
-      age: body.age,
-      role: body.role,
-      primary_goal: body.primary_goal,
-      non_negotiables: body.non_negotiables,
-      strictness: body.strictness,
-      communication_style: body.communication_style,
-      reminder_time: body.reminder_time,
-      onboarded: body.onboarded,
+    if (Object.keys(profileFields).length === 0) {
+      return Response.json({ error: 'No fields to update' }, { status: 400 })
     }
 
     const { data: updated, error: updateError } = await supabaseAdmin
@@ -86,7 +109,7 @@ export async function PATCH(req: Request) {
       }
     }
 
-    return Response.json({ success: true, onboarded: body.onboarded })
+    return Response.json({ success: true, onboarded: body.onboarded ?? true })
   } catch (error) {
     console.error('Profile error:', error)
     return new Response('Internal server error', { status: 500 })

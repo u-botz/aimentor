@@ -35,7 +35,7 @@ export async function fetchMemoryContext(userId: string): Promise<{
 
     supabaseAdmin
       .from('open_commitments')
-      .select('commitment, made_on')
+      .select('commitment, made_on, due_date')
       .eq('user_id', userId)
       .eq('status', 'open')
       .order('made_on', { ascending: false })
