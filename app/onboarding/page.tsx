@@ -57,7 +57,7 @@ export default function OnboardingPage() {
     fetch('/api/user/profile')
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { onboarded?: boolean } | null) => {
-        if (data?.onboarded) router.replace('/chat')
+        if (data?.onboarded) router.replace('/dashboard')
       })
       .catch(console.error)
   }, [isLoaded, user, router])
@@ -122,6 +122,8 @@ export default function OnboardingPage() {
 
     setSubmitting(true)
     try {
+      await fetch('/api/user/sync', { method: 'POST' })
+
       const res = await fetch('/api/user/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -138,10 +140,17 @@ export default function OnboardingPage() {
         }),
       })
 
-      if (!res.ok) throw new Error('Failed to save profile')
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}))
+        throw new Error(
+          (errBody as { error?: string }).error ?? 'Failed to save profile'
+        )
+      }
 
-      router.push('/chat')
-    } catch {
+      // Hard navigation so middleware sees onboarded=true (soft router.push can loop back here)
+      window.location.assign('/dashboard')
+    } catch (err) {
+      console.error('Onboarding submit error:', err)
       setError('Something went wrong. Please try again.')
       setSubmitting(false)
     }

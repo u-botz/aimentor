@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { auth, currentUser } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 
 export async function GET() {
@@ -41,27 +41,49 @@ export async function PATCH(req: Request) {
       onboarded: boolean
     }
 
-    const { error } = await supabaseAdmin
-      .from('users')
-      .update({
-        name: body.name,
-        age: body.age,
-        role: body.role,
-        primary_goal: body.primary_goal,
-        non_negotiables: body.non_negotiables,
-        strictness: body.strictness,
-        communication_style: body.communication_style,
-        reminder_time: body.reminder_time,
-        onboarded: body.onboarded,
-      })
-      .eq('id', userId)
+    const profileFields = {
+      name: body.name,
+      age: body.age,
+      role: body.role,
+      primary_goal: body.primary_goal,
+      non_negotiables: body.non_negotiables,
+      strictness: body.strictness,
+      communication_style: body.communication_style,
+      reminder_time: body.reminder_time,
+      onboarded: body.onboarded,
+    }
 
-    if (error) {
-      console.error('Profile update error:', error)
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from('users')
+      .update(profileFields)
+      .eq('id', userId)
+      .select('id')
+      .maybeSingle()
+
+    if (updateError) {
+      console.error('Profile update error:', updateError)
       return new Response('DB error', { status: 500 })
     }
 
-    return Response.json({ success: true })
+    if (!updated) {
+      const clerkUser = await currentUser()
+      const email = clerkUser?.emailAddresses[0]?.emailAddress
+      const { error: insertError } = await supabaseAdmin.from('users').insert({
+        id: userId,
+        email,
+        ...profileFields,
+      })
+
+      if (insertError) {
+        console.error('Profile insert error:', insertError)
+        return Response.json(
+          { error: 'Could not save profile' },
+          { status: 500 }
+        )
+      }
+    }
+
+    return Response.json({ success: true, onboarded: body.onboarded })
   } catch (error) {
     console.error('Profile error:', error)
     return new Response('Internal server error', { status: 500 })
