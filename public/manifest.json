@@ -1,0 +1,11 @@
+{
+  "name": "AI Mentor",
+  "short_name": "Mentor",
+  "description": "The only AI that remembers who you said you'd be.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "orientation": "portrait",
+  "icons": []
+}
