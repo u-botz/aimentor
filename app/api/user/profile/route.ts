@@ -1,6 +1,29 @@
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 
+export async function GET() {
+  try {
+    const { userId } = await auth()
+    if (!userId) return new Response('Unauthorized', { status: 401 })
+
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .select('onboarded')
+      .eq('id', userId)
+      .maybeSingle()
+
+    if (error) {
+      console.error('Profile fetch error:', error)
+      return new Response('DB error', { status: 500 })
+    }
+
+    return Response.json({ onboarded: data?.onboarded === true })
+  } catch (error) {
+    console.error('Profile GET error:', error)
+    return new Response('Internal server error', { status: 500 })
+  }
+}
+
 export async function PATCH(req: Request) {
   try {
     const { userId } = await auth()

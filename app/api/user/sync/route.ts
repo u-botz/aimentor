@@ -16,16 +16,23 @@ export async function POST() {
       email?.split('@')[0] ||
       'User'
 
-    // Upsert — safe to call multiple times
-    const { error } = await supabaseAdmin.from('users').upsert(
-      {
-        id: userId,
-        email,
-        name,
-        onboarded: false,
-      },
-      { onConflict: 'id' }
-    )
+    const { data: existing } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle()
+
+    const { error } = existing
+      ? await supabaseAdmin
+          .from('users')
+          .update({ email, name })
+          .eq('id', userId)
+      : await supabaseAdmin.from('users').insert({
+          id: userId,
+          email,
+          name,
+          onboarded: false,
+        })
 
     if (error) {
       console.error('User sync error:', error)

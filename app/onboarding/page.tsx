@@ -54,6 +54,16 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     if (!isLoaded || !user) return
+    fetch('/api/user/profile')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { onboarded?: boolean } | null) => {
+        if (data?.onboarded) router.replace('/chat')
+      })
+      .catch(console.error)
+  }, [isLoaded, user, router])
+
+  useEffect(() => {
+    if (!isLoaded || !user) return
     const clerkName =
       user.fullName ||
       [user.firstName, user.lastName].filter(Boolean).join(' ')

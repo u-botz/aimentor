@@ -138,6 +138,14 @@ export default function ChatPage() {
     async function initialize() {
       try {
         await fetch('/api/user/sync', { method: 'POST' })
+        const profileRes = await fetch('/api/user/profile')
+        if (profileRes.ok) {
+          const profile = (await profileRes.json()) as { onboarded?: boolean }
+          if (!profile.onboarded) {
+            router.replace('/onboarding')
+            return
+          }
+        }
         if (!cancelled) fetchSessions()
       } catch (err) {
         console.error('Initialization failed:', err)
@@ -146,8 +154,7 @@ export default function ChatPage() {
 
     initialize()
     return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [router])
 
   // ── Textarea resize ──────────────────────────────────────────────────────────
 
