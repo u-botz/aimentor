@@ -7,7 +7,6 @@ import {
   SendHorizontal,
   Square,
   Sparkles,
-  Plus,
   Moon,
   MessageCircle,
   Menu,
@@ -27,8 +26,32 @@ type SessionSummary = {
   id: string
   mode: SessionMode
   created_at: string
+  status: string | null
+  debrief_date: string | null
   first_message: string | null
 }
+
+const getISTTime = () => {
+  const now = new Date()
+  const istTime = new Date(
+    now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })
+  )
+  return {
+    hours: istTime.getHours(),
+    minutes: istTime.getMinutes(),
+  }
+}
+
+const isPastReminderTime = (reminderTime: string) => {
+  const [reminderHour, reminderMinute] = reminderTime.split(':').map(Number)
+  const { hours, minutes } = getISTTime()
+  const nowTotal = hours * 60 + minutes
+  const reminderTotal = reminderHour * 60 + reminderMinute
+  return nowTotal >= reminderTotal
+}
+
+const getTodayISTDate = () =>
+  new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
 
 const LINE_HEIGHT_PX = 24
 const MAX_TEXTAREA_LINES = 4
@@ -103,6 +126,9 @@ export default function ChatPage() {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [loadingSession, setLoadingSession] = useState(false)
+  const [hasDebriefedToday, setHasDebriefedToday] = useState(false)
+  const [reminderTime, setReminderTime] = useState<string | null>(null)
+  const [isDebriefTime, setIsDebriefTime] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -125,10 +151,38 @@ export default function ChatPage() {
       if (!res.ok) return
       const data = (await res.json()) as SessionSummary[]
       setSessions(data)
+      const today = getTodayISTDate()
+      setHasDebriefedToday(
+        data.some(
+          (s) =>
+            s.mode === 'debrief' &&
+            s.status === 'closed' &&
+            s.debrief_date === today
+        )
+      )
     } catch (err) {
       console.error('Failed to fetch sessions:', err)
     }
   }, [])
+
+  // Auto-refresh CTA when IST clock crosses the user's reminder_time
+  useEffect(() => {
+    if (!reminderTime) return
+
+    setIsDebriefTime(isPastReminderTime(reminderTime))
+
+    const [reminderHour, reminderMinute] = reminderTime.split(':').map(Number)
+    const now = new Date()
+    const ist = new Date(
+      now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })
+    )
+    const target = new Date(ist)
+    target.setHours(reminderHour, reminderMinute, 0, 0)
+    if (ist >= target) target.setDate(target.getDate() + 1)
+    const msUntilReminder = target.getTime() - ist.getTime()
+    const timer = setTimeout(() => setIsDebriefTime(true), msUntilReminder)
+    return () => clearTimeout(timer)
+  }, [reminderTime])
 
   // ── Init — only sync user + load sidebar. Session created lazily on first send. ──
 
@@ -140,10 +194,16 @@ export default function ChatPage() {
         await fetch('/api/user/sync', { method: 'POST' })
         const profileRes = await fetch('/api/user/profile')
         if (profileRes.ok) {
-          const profile = (await profileRes.json()) as { onboarded?: boolean }
+          const profile = (await profileRes.json()) as {
+            onboarded?: boolean
+            reminder_time?: string | null
+          }
           if (!profile.onboarded) {
             router.replace('/onboarding')
             return
+          }
+          if (profile.reminder_time) {
+            setReminderTime(profile.reminder_time)
           }
         }
         if (!cancelled) fetchSessions()
@@ -181,6 +241,16 @@ export default function ChatPage() {
     setConfirmEnd(false)
     setSidebarOpen(false)
   }, [])
+
+  const handleSmartCTA = useCallback(() => {
+    if (hasDebriefedToday) {
+      createNewSession('open_chat')
+    } else if (isDebriefTime) {
+      createNewSession('debrief')
+    } else {
+      createNewSession('open_chat')
+    }
+  }, [hasDebriefedToday, isDebriefTime, createNewSession])
 
   // ── Actually create the DB session row (called once per conversation) ─────────
 
@@ -368,19 +438,19 @@ export default function ChatPage() {
           <div className="flex flex-col gap-2">
             <button
               type="button"
-              onClick={() => createNewSession('open_chat')}
-              className="flex items-center gap-2 w-full rounded-lg bg-[#2E5BFF] px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-[#2548d4]"
+              onClick={handleSmartCTA}
+              className={cn(
+                'w-full rounded-lg px-3 py-2 text-xs font-medium transition-colors',
+                hasDebriefedToday
+                  ? 'bg-zinc-800/80 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
+                  : 'bg-[#2E5BFF] text-white hover:bg-[#2548d4]'
+              )}
             >
-              <Plus className="h-3.5 w-3.5" />
-              New Chat
-            </button>
-            <button
-              type="button"
-              onClick={() => createNewSession('debrief')}
-              className="flex items-center gap-2 w-full rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100"
-            >
-              <Moon className="h-3.5 w-3.5" />
-              Start Debrief
+              {hasDebriefedToday
+                ? '✓ Debrief Done'
+                : isDebriefTime
+                  ? "Start Tonight's Debrief"
+                  : 'Talk to Your Mentor'}
             </button>
           </div>
         </div>

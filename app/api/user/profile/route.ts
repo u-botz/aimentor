@@ -8,7 +8,7 @@ export async function GET() {
 
     const { data, error } = await supabaseAdmin
       .from('users')
-      .select('onboarded')
+      .select('onboarded, reminder_time')
       .eq('id', userId)
       .maybeSingle()
 
@@ -17,7 +17,10 @@ export async function GET() {
       return new Response('DB error', { status: 500 })
     }
 
-    return Response.json({ onboarded: data?.onboarded === true })
+    return Response.json({
+      onboarded: data?.onboarded === true,
+      reminder_time: data?.reminder_time ?? null,
+    })
   } catch (error) {
     console.error('Profile GET error:', error)
     return new Response('Internal server error', { status: 500 })

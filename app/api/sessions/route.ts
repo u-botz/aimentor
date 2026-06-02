@@ -13,6 +13,8 @@ export async function GET() {
         id,
         mode,
         created_at,
+        status,
+        debrief_date,
         messages (
           content,
           role,
@@ -44,6 +46,8 @@ export async function GET() {
         id: session.id,
         mode: session.mode as 'open_chat' | 'debrief',
         created_at: session.created_at,
+        status: session.status as string | null,
+        debrief_date: session.debrief_date as string | null,
         first_message: firstUserMsg?.content ?? null,
       }
     })
