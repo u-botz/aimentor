@@ -22,6 +22,13 @@ export default function RootLayout({
         <head>
           <link rel="manifest" href="/manifest.json" />
           <meta name="theme-color" content="#0a0a0a" />
+
+          {/* Android / Chrome PWA */}
+          <meta name="mobile-web-app-capable" content="yes" />
+          <link rel="icon" sizes="192x192" href="/icons/icon-192.png" />
+          <link rel="icon" sizes="512x512" href="/icons/icon-512.png" />
+
+          {/* iOS / Safari PWA */}
           <meta name="apple-mobile-web-app-capable" content="yes" />
           <meta
             name="apple-mobile-web-app-status-bar-style"
@@ -29,7 +36,6 @@ export default function RootLayout({
           />
           <meta name="apple-mobile-web-app-title" content="AI Mentor" />
           <link rel="apple-touch-icon" href="/icons/icon-180.png" />
-          <meta name="mobile-web-app-capable" content="yes" />
         </head>
         <body className={inter.className}>
           <ServiceWorkerRegister />

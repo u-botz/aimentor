@@ -131,8 +131,9 @@ export function AppSidebar({
       return
     }
     onClose()
-    router.push('/chat')
-  }, [onNewChat, onClose, router])
+    const dest = !hasDebriefedToday && isDebriefTime ? '/chat?mode=debrief' : '/chat'
+    router.push(dest)
+  }, [onNewChat, onClose, router, hasDebriefedToday, isDebriefTime])
 
   const handleSelect = useCallback(
     (s: SessionSummary) => {

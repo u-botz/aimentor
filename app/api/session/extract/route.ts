@@ -181,15 +181,14 @@ Answer these questions in JSON:
             .eq('id', userId))]
         : []),
 
-      // c. Insert carry_forward into session_summaries
-      ...(extracted.carry_forward
-        ? [wrap(supabaseAdmin.from('session_summaries').insert({
-            user_id: userId,
-            session_id: sessionId,
-            summary_date: today,
-            summary: extracted.carry_forward,
-          }))]
-        : []),
+      // c. Insert into session_summaries — always write a row so the idempotency
+      //    guard above fires correctly even when carry_forward is null.
+      wrap(supabaseAdmin.from('session_summaries').insert({
+        user_id: userId,
+        session_id: sessionId,
+        summary_date: today,
+        summary: extracted.carry_forward ?? '',
+      })),
 
       // d. Insert new commitments
       ...(newCommitments.length > 0 && !commitmentsAlreadyInserted

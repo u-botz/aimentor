@@ -111,6 +111,7 @@ function ChatPage() {
   const [sessionSaved, setSessionSaved] = useState(false)
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState(false)
 
   // Sidebar state
   const [sessions, setSessions] = useState<SessionSummary[]>([])
@@ -316,6 +317,7 @@ function ChatPage() {
     if (!sessionId) return
     setIsSaving(true)
     setConfirmEnd(false)
+    setSaveError(false)
     try {
       const closeRes = await fetch('/api/session/close', {
         method: 'POST',
@@ -331,9 +333,11 @@ function ChatPage() {
       })
       if (!extractRes.ok) throw new Error('Extraction failed')
 
+      setSessionSaved(true)
       router.push('/dashboard')
     } catch (err) {
       console.error('End session error:', err)
+      setSaveError(true)
     } finally {
       setIsSaving(false)
     }
@@ -513,6 +517,15 @@ function ChatPage() {
             )}
             {sessionSaved && (
               <span className="text-xs text-emerald-400">✓ Session saved</span>
+            )}
+            {saveError && (
+              <button
+                type="button"
+                onClick={handleEndSession}
+                className="text-xs text-red-400 hover:text-red-300 underline underline-offset-2"
+              >
+                Save failed — tap to retry
+              </button>
             )}
           </div>
         </header>
