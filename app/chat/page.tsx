@@ -2,17 +2,9 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useUser, UserButton } from '@clerk/nextjs'
-import {
-  SendHorizontal,
-  Square,
-  Sparkles,
-  Moon,
-  MessageCircle,
-  Menu,
-  X,
-} from 'lucide-react'
+import { SendHorizontal, Square, Menu, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { AppSidebar } from '@/components/AppSidebar'
 
 type MessageRole = 'user' | 'assistant'
 type SessionMode = 'open_chat' | 'debrief' | 'morning'
@@ -56,18 +48,6 @@ const getTodayISTDate = () =>
 const LINE_HEIGHT_PX = 24
 const MAX_TEXTAREA_LINES = 4
 
-function relativeDate(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const yesterdayStart = new Date(todayStart)
-  yesterdayStart.setDate(todayStart.getDate() - 1)
-
-  if (date >= todayStart) return 'Today'
-  if (date >= yesterdayStart) return 'Yesterday'
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
 function renderMarkdown(text: string) {
   const segments = text.split(/(\*\*[^*]+\*\*)/g)
   return segments.map((segment, i) => {
@@ -109,7 +89,6 @@ function TypingIndicator() {
 function ChatPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { isLoaded, user } = useUser()
 
   // Chat state
   const [messages, setMessages] = useState<Message[]>([])
@@ -300,6 +279,24 @@ function ChatPage() {
     }
   }, [sessionId])
 
+  // ── Open a session linked from another page (/chat?session=<id>) ──────────────
+  const sessionParam = searchParams.get('session')
+  const appliedSessionParamRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (
+      !sessionParam ||
+      sessionParam === sessionId ||
+      sessionParam === appliedSessionParamRef.current
+    )
+      return
+    const summary = sessions.find((s) => s.id === sessionParam)
+    if (summary) {
+      appliedSessionParamRef.current = sessionParam
+      loadSession(summary)
+    }
+  }, [sessionParam, sessions, sessionId, loadSession])
+
   // ── End debrief session ──────────────────────────────────────────────────────
 
   const handleEndSession = async () => {
@@ -419,109 +416,16 @@ function ChatPage() {
   return (
     <div className="flex h-dvh overflow-hidden bg-[#0a0a0f] text-zinc-100">
 
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-20 bg-black/50 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* ── Sidebar ── */}
-      <aside
-        className={cn(
-          'fixed inset-y-0 left-0 z-30 flex w-[260px] flex-col bg-[#111118]',
-          'border-r border-zinc-800/60 transition-transform duration-200',
-          'md:relative md:translate-x-0',
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        )}
-      >
-        {/* Sidebar top */}
-        <div className="shrink-0 px-4 pt-4 pb-3 border-b border-zinc-800/40">
-          <div className="flex items-center gap-2 mb-4">
-            <Sparkles className="h-4 w-4 text-[#2E5BFF]" />
-            <span className="text-sm font-semibold tracking-tight">AI Mentor</span>
-          </div>
-          <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              onClick={handleSmartCTA}
-              className={cn(
-                'w-full rounded-lg px-3 py-2 text-xs font-medium transition-colors',
-                hasDebriefedToday
-                  ? 'bg-zinc-800/80 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
-                  : 'bg-[#2E5BFF] text-white hover:bg-[#2548d4]'
-              )}
-            >
-              {hasDebriefedToday
-                ? '✓ Debrief Done'
-                : isDebriefTime
-                  ? "Start Tonight's Debrief"
-                  : 'Talk to Your Mentor'}
-            </button>
-          </div>
-        </div>
-
-        {/* Sessions list */}
-        <div className="flex-1 overflow-y-auto py-3">
-          {sessions.length > 0 && (
-            <p className="px-4 pb-2 text-[10px] font-medium uppercase tracking-wider text-zinc-600">
-              Recent
-            </p>
-          )}
-          <ul className="flex flex-col gap-0.5 px-2">
-            {sessions.map((s) => {
-              const isActive = s.id === sessionId
-              const title = s.first_message
-                ? s.first_message.slice(0, 40) +
-                  (s.first_message.length > 40 ? '…' : '')
-                : 'New conversation'
-              return (
-                <li key={s.id}>
-                  <button
-                    type="button"
-                    onClick={() => loadSession(s)}
-                    className={cn(
-                      'w-full rounded-lg px-3 py-2.5 text-left transition-colors',
-                      'border-l-2',
-                      isActive
-                        ? 'border-[#2E5BFF] bg-[#1a1a2e] text-zinc-100'
-                        : 'border-transparent text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
-                    )}
-                  >
-                    <div className="flex items-center gap-2 mb-0.5">
-                      {s.mode === 'debrief' ? (
-                        <Moon className="h-3 w-3 shrink-0 text-zinc-500" />
-                      ) : (
-                        <MessageCircle className="h-3 w-3 shrink-0 text-zinc-500" />
-                      )}
-                      <span className="truncate text-xs font-medium leading-tight">
-                        {title}
-                      </span>
-                    </div>
-                    <p className="pl-5 text-[10px] text-zinc-600">
-                      {relativeDate(s.created_at)}
-                    </p>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-
-        {/* Sidebar bottom — user */}
-        <div className="shrink-0 border-t border-zinc-800/40 px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            {isLoaded && <UserButton />}
-            <div className="min-w-0">
-              <p className="truncate text-xs font-medium text-zinc-300">
-                {user?.firstName ?? user?.emailAddresses?.[0]?.emailAddress ?? ''}
-              </p>
-              <p className="text-[10px] text-zinc-600">Free</p>
-            </div>
-          </div>
-        </div>
-      </aside>
+      <AppSidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        sessions={sessions}
+        activeSessionId={sessionId}
+        onSelectSession={loadSession}
+        onNewChat={handleSmartCTA}
+        hasDebriefedToday={hasDebriefedToday}
+        isDebriefTime={isDebriefTime}
+      />
 
       {/* ── Main area ── */}
       <div className="flex flex-1 flex-col min-w-0">

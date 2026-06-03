@@ -2,6 +2,18 @@ import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { istDateString, shiftDateString } from '@/lib/date'
 
+function getCurrentTimeIST(): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date())
+  const hour = parts.find((p) => p.type === 'hour')?.value ?? '00'
+  const minute = parts.find((p) => p.type === 'minute')?.value ?? '00'
+  return `${hour}:${minute}`
+}
+
 export async function GET(req: Request) {
   try {
     const { userId } = await auth()
@@ -19,7 +31,7 @@ export async function GET(req: Request) {
     // Fetch open commitments
     const { data: commitments, error: commitsError } = await supabaseAdmin
       .from('open_commitments')
-      .select('commitment, made_on')
+      .select('commitment, made_on, due_date')
       .eq('user_id', userId)
       .eq('status', 'open')
       .order('made_on', { ascending: false })
@@ -28,8 +40,32 @@ export async function GET(req: Request) {
 
     const openCommitments = commitments?.map(c => ({
       commitment: c.commitment,
-      date: c.made_on
+      date: c.made_on,
+      due_date: c.due_date ?? null
     })) || []
+
+    // Fetch the user's check-in times for time-of-day context
+    const { data: userRow } = await supabaseAdmin
+      .from('users')
+      .select('reminder_time, morning_time')
+      .eq('id', userId)
+      .maybeSingle()
+
+    // Fetch today's morning-set plan (if any)
+    const todayPlanDate = istDateString()
+    const { data: planRow } = await supabaseAdmin
+      .from('daily_plans')
+      .select('top_priority, intentions')
+      .eq('user_id', userId)
+      .eq('plan_date', todayPlanDate)
+      .maybeSingle()
+
+    const todaysPlan = planRow
+      ? {
+          top_priority: planRow.top_priority ?? '',
+          intentions: planRow.intentions ?? '',
+        }
+      : null
 
     const validLogs = logs?.filter(log => log.completed) || []
 
@@ -59,16 +95,14 @@ export async function GET(req: Request) {
     const yesterdayStr = shiftDateString(todayStr, -1)
 
     let dStreak = 0
-    let hStreak = 0
-    let cStreak = 0
+    let financeStreak = 0
 
     if (validLogs.length > 0) {
       const mostRecentDate = validLogs[0].debrief_date
       // Start counting streak only if the most recent log is from today or yesterday
       if (mostRecentDate === todayStr || mostRecentDate === yesterdayStr) {
         let cursorDateStr: string = mostRecentDate
-        let hBroken = false
-        let cBroken = false
+        let financeBroken = false
         let logIndex = 0
 
         while (logIndex < validLogs.length) {
@@ -78,16 +112,12 @@ export async function GET(req: Request) {
           if (log.debrief_date === targetDateStr) {
             dStreak++
 
-            if (!hBroken && (log.hydration_litres ?? 0) >= 2.0) {
-              hStreak++
+            // Finance streak: a logged day with no finance violation (false/null).
+            // Stops at the first day with finance_violation = true.
+            if (!financeBroken && !log.finance_violation) {
+              financeStreak++
             } else {
-              hBroken = true
-            }
-
-            if (!cBroken && !log.dairy_violation && !log.finance_violation) {
-              cStreak++
-            } else {
-              cBroken = true
+              financeBroken = true
             }
 
             cursorDateStr = shiftDateString(cursorDateStr, -1)
@@ -126,12 +156,28 @@ export async function GET(req: Request) {
       ? Math.round((scoredLogs.reduce((acc, log) => acc + (log.score_overall ?? 0), 0) / scoredLogs.length) * 10) / 10
       : 0
 
+    // Time-of-day context (IST) for the frontend to pick the right state
+    const currentTime = getCurrentTimeIST()
+    const reminderTime = userRow?.reminder_time ?? null
+    let period: 'morning' | 'day' | 'evening'
+    if (currentTime < '12:00') {
+      period = 'morning'
+    } else if (reminderTime && currentTime >= reminderTime) {
+      period = 'evening'
+    } else {
+      period = 'day'
+    }
+
     return Response.json({
       streaks: {
         debrief: dStreak,
-        hydration: hStreak,
-        clean: cStreak
+        finance: financeStreak
       },
+      timeContext: {
+        period,
+        currentTime
+      },
+      todaysPlan,
       recentScores,
       weeklyAverage,
       todaysPriority,

@@ -29,6 +29,7 @@ export async function fetchMemoryContext(userId: string): Promise<{
       .from('debrief_logs')
       .select('debrief_date, tomorrow_priority')
       .eq('user_id', userId)
+      .eq('completed', true)
       .order('debrief_date', { ascending: false })
       .limit(1)
       .single(),

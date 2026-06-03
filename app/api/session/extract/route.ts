@@ -1,5 +1,5 @@
 import { auth } from '@clerk/nextjs/server'
-import { streamChat } from '@/lib/model-router'
+import { streamChat, resolveModel } from '@/lib/model-router'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { istDateString } from '@/lib/date'
 
@@ -109,7 +109,8 @@ Answer these questions in JSON:
     const stream = await streamChat(
       extractionSystemPrompt,
       [{ role: 'user', content: userPrompt }],
-      'haiku'
+      resolveModel('fast'),
+      1024
     )
 
     let rawText = ''

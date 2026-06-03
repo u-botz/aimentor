@@ -1,9 +1,69 @@
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
-import { streamChat } from '@/lib/model-router'
+import { streamChat, resolveModel } from '@/lib/model-router'
 import { assembleSystemPrompt, type SessionMode } from '@/lib/prompts/assemble'
 import { fetchMemoryContext } from '@/lib/memory/fetch-context'
 import { rewriteMemory } from '@/lib/memory/rewrite'
+import { MORNING_PRIORITY_EXTRACT_PROMPT } from '@/lib/prompts/layer4-mode'
+import { istDateString } from '@/lib/date'
+
+// Silently extract today's committed priority + intention from a morning
+// conversation and upsert it into daily_plans (last write wins). A failure here
+// must never break the chat response, so all callers wrap this in try/catch.
+async function saveMorningPlan(
+  userId: string,
+  conversation: { role: 'user' | 'assistant'; content: string }[]
+): Promise<void> {
+  const conversationText = conversation
+    .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+    .join('\n')
+
+  const stream = await streamChat(
+    MORNING_PRIORITY_EXTRACT_PROMPT,
+    [{ role: 'user', content: conversationText }],
+    resolveModel('fast'),
+    256
+  )
+
+  let raw = ''
+  for await (const chunk of stream) {
+    if (
+      chunk.type === 'content_block_delta' &&
+      chunk.delta.type === 'text_delta'
+    ) {
+      raw += chunk.delta.text
+    }
+  }
+
+  // Models sometimes wrap JSON in ```json fences or add stray prose — strip
+  // fences and isolate the first {...} object before parsing.
+  const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim()
+  const match = cleaned.match(/\{[\s\S]*\}/)
+  const jsonText = match ? match[0] : cleaned
+
+  let parsed: { top_priority?: string; intentions?: string }
+  try {
+    parsed = JSON.parse(jsonText)
+  } catch (err) {
+    console.error('Morning plan JSON parse failed. Raw response:', raw, err)
+    return
+  }
+
+  const topPriority = (parsed.top_priority ?? '').trim()
+
+  // Only write when a real priority exists.
+  if (!topPriority) return
+
+  await supabaseAdmin.from('daily_plans').upsert(
+    {
+      user_id: userId,
+      plan_date: istDateString(),
+      top_priority: topPriority,
+      intentions: (parsed.intentions ?? '').trim(),
+    },
+    { onConflict: 'user_id,plan_date' }
+  )
+}
 
 export async function POST(req: Request) {
   try {
@@ -67,7 +127,9 @@ export async function POST(req: Request) {
       messages.map((m) => ({
         role: m.role,
         content: m.content,
-      }))
+      })),
+      resolveModel('deep'),
+      1024
     )
 
     // 8. Stream response back + save assistant message when done
@@ -94,6 +156,18 @@ export async function POST(req: Request) {
           role: 'assistant',
           content: fullResponse,
         })
+
+        // Morning mode: silently capture today's plan. Never break the response.
+        if (mode === 'morning') {
+          try {
+            await saveMorningPlan(userId, [
+              ...messages,
+              { role: 'assistant', content: fullResponse },
+            ])
+          } catch (err) {
+            console.error('Morning plan save failed:', err)
+          }
+        }
 
         controller.close()
       },

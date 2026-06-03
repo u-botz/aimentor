@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft, X, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { AppShell } from '@/components/AppShell'
 
 type CommunicationStyle = 'Direct' | 'Balanced' | 'Encouraging'
 
@@ -143,22 +144,22 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-dvh flex-col bg-[#0a0a0f] text-zinc-100">
+      <AppShell>
         <div className="mx-auto w-full max-w-[480px] flex-1 p-5 animate-pulse">
           <div className="mb-6 mt-2 h-8 w-1/3 rounded bg-zinc-800" />
           <div className="mb-4 h-32 rounded-xl border border-zinc-800 bg-zinc-900/50" />
           <div className="mb-4 h-24 rounded-xl border border-zinc-800 bg-zinc-900/50" />
           <div className="h-40 rounded-xl border border-zinc-800 bg-zinc-900/50" />
         </div>
-      </div>
+      </AppShell>
     )
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-[#0a0a0f] text-zinc-100">
+    <AppShell>
       <div className="mx-auto w-full max-w-[480px] flex-1 px-5 py-8">
         {/* Header */}
-        <div className="mb-8 flex items-center gap-3">
+        <div className="mb-8 flex items-center gap-3 pl-8 md:pl-0">
           <button
             type="button"
             onClick={() => router.push('/dashboard')}
@@ -378,6 +379,6 @@ export default function ProfilePage() {
           </button>
         </div>
       </div>
-    </div>
+    </AppShell>
   )
 }
