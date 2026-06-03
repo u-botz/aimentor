@@ -25,12 +25,18 @@ type CommitmentMade = {
   due_date: string | null
 }
 
+type ScheduledNotification = {
+  message: string
+  send_at: string
+}
+
 type ExtractionResult = {
   new_pattern: string | null
   new_strength: string | null
   commitments_made: CommitmentMade[]
   commitments_resolved: string[]
   carry_forward: string | null
+  scheduled_notifications: ScheduledNotification[]
   structured: Structured
 }
 
@@ -104,6 +110,12 @@ Answer these questions in JSON:
   "commitments_made": [{"text": "a specific commitment the user made", "due_date": "YYYY-MM-DD if the user named or implied a deadline (e.g. 'by Friday', 'tomorrow', 'this week'), else null"}],
   "commitments_resolved": ["list of commitments that were explicitly marked done or closed, empty array if none"],
   "carry_forward": "one sentence — the single most important thing to remember from this conversation for future sessions",
+  "scheduled_notifications": [
+    {
+      "message": "the reminder text to push to the user",
+      "send_at": "ISO 8601 timestamp in IST e.g. 2026-06-04T21:00:00+05:30"
+    }
+  ],
   "structured": {
     "score_overall": <1-10 or null>,
     "win": "short string or null",
@@ -115,7 +127,7 @@ ${financeFields}
 }`
 
     const extractionSystemPrompt =
-      'You are a memory extraction assistant. Analyze this mentor conversation and extract only what matters long term. Return ONLY valid JSON. No explanation. No preamble. No markdown backticks.'
+      'You are a memory extraction assistant. Analyze this mentor conversation and extract only what matters long term. Return ONLY valid JSON. No explanation. No preamble. No markdown backticks. For scheduled_notifications: only include an entry if the user EXPLICITLY asked to be reminded about something at a specific time; otherwise return an empty array.'
 
     const stream = await streamChat(
       extractionSystemPrompt,
@@ -281,6 +293,33 @@ ${financeFields}
       }
     })
     if (anyFailed) throw new Error('DB error')
+
+    // ── Scheduled notifications ────────────────────────────────────────────────
+    const pendingNotifications = (extracted.scheduled_notifications ?? []).filter(
+      (n) =>
+        typeof n.message === 'string' &&
+        n.message.trim() &&
+        typeof n.send_at === 'string' &&
+        n.send_at
+    )
+    if (pendingNotifications.length > 0) {
+      const { error: schedErr } = await supabaseAdmin
+        .from('scheduled_notifications')
+        .insert(
+          pendingNotifications.map((n) => ({
+            user_id: userId,
+            message: n.message.trim(),
+            send_at: n.send_at,
+            sent: false,
+          }))
+        )
+      if (schedErr) {
+        console.error(
+          `[extract] scheduled_notifications insert failed for session ${sessionId}:`,
+          schedErr
+        )
+      }
+    }
 
     return {
       new_pattern: extracted.new_pattern,

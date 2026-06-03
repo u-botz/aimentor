@@ -1,7 +1,10 @@
 import webpush from 'web-push'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { istDateString, shiftDateString } from '@/lib/date'
-import { generateProactiveMessage } from '@/lib/mentor-voice'
+import {
+  generateProactiveMessage,
+  type ProactiveKind,
+} from '@/lib/mentor-voice'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -26,13 +29,6 @@ function isValidCronRequest(req: Request): boolean {
   return auth === `Bearer ${secret}`
 }
 
-type NotificationKind =
-  | 'morning'
-  | 'debrief'
-  | 'streak_broken'
-  | 'gone_quiet'
-  | 'commitment_due'
-
 type CandidateUser = {
   id: string
   name: string | null
@@ -41,7 +37,7 @@ type CandidateUser = {
   morning_enabled: boolean | null
 }
 
-function urlForKind(kind: NotificationKind): string {
+function urlForKind(kind: ProactiveKind): string {
   if (kind === 'morning') return '/chat?mode=morning'
   if (kind === 'debrief') return '/chat?mode=debrief'
   return '/chat'
@@ -130,10 +126,10 @@ export async function GET(req: Request) {
         const alreadySent = new Set(
           (sentToday ?? []).map((r: { kind: string }) => r.kind)
         )
-        const notSent = (kind: NotificationKind) => !alreadySent.has(kind)
+        const notSent = (kind: ProactiveKind) => !alreadySent.has(kind)
 
         // The notifications we'll actually send this run, with their context.
-        const toSend: { kind: NotificationKind; context: string }[] = []
+        const toSend: { kind: ProactiveKind; context: string }[] = []
 
         // ── Exact-time triggers (independent) ────────────────────────────────
         const morningTime = normalizeTime(user.morning_time)
@@ -268,6 +264,61 @@ export async function GET(req: Request) {
         }
       } catch (err) {
         console.error(`Notify failed — user ${userId}:`, err)
+      }
+    }
+
+    // ── Trigger F: scheduled_notifications ────────────────────────────────────
+    const { data: scheduledRows, error: schedQueryErr } = await supabaseAdmin
+      .from('scheduled_notifications')
+      .select('id, user_id, message')
+      .eq('sent', false)
+      .lte('send_at', new Date().toISOString())
+
+    if (schedQueryErr) {
+      console.error('scheduled_notifications query error:', schedQueryErr)
+    } else {
+      for (const row of scheduledRows ?? []) {
+        try {
+          const cand = candidates.get(row.user_id)
+          if (!cand) continue
+
+          await webpush.sendNotification(
+            cand.subscription,
+            JSON.stringify({
+              title: 'AI Mentor',
+              body: row.message,
+              url: '/chat',
+            })
+          )
+
+          await supabaseAdmin
+            .from('scheduled_notifications')
+            .update({ sent: true })
+            .eq('id', row.id)
+
+          await supabaseAdmin.from('notification_log').upsert(
+            { user_id: row.user_id, kind: 'scheduled', sent_date: todayIST },
+            { onConflict: 'user_id,kind,sent_date', ignoreDuplicates: true }
+          )
+
+          sent += 1
+        } catch (err) {
+          const statusCode = (err as { statusCode?: number })?.statusCode
+          if (statusCode === 404 || statusCode === 410) {
+            await supabaseAdmin
+              .from('push_subscriptions')
+              .delete()
+              .eq('user_id', row.user_id)
+            console.warn(
+              `Removed expired subscription for user ${row.user_id} (scheduled)`
+            )
+            continue
+          }
+          console.error(
+            `Scheduled notification failed — id ${row.id} user ${row.user_id}:`,
+            err
+          )
+        }
       }
     }
 

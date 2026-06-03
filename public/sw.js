@@ -1,6 +1,11 @@
-const CACHE_NAME = 'ai-mentor-v1'
+// Bump this version whenever the caching strategy changes — the activate
+// handler deletes every cache that doesn't match, purging stale entries
+// (including the old precached "/" landing page).
+const CACHE_NAME = 'ai-mentor-v2'
 
-const APP_SHELL = ['/', '/offline.html']
+// Only the offline fallback is precached. The app shell ("/", "/dashboard", …)
+// is intentionally NOT cached so auth redirects and fresh HTML always win.
+const APP_SHELL = ['/offline.html']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -27,6 +32,22 @@ self.addEventListener('fetch', (event) => {
 
   if (request.method !== 'GET') return
 
+  // HTML page loads (navigations) are NEVER cached and always go to the network.
+  // This guarantees auth redirects (e.g. "/" → "/dashboard") and fresh app HTML
+  // are honored, and the stale marketing page can never be replayed from cache.
+  // Only when the network is truly unavailable do we fall back to the offline page.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request).catch(async () => {
+        const offline = await caches.match('/offline.html')
+        return offline ?? Response.error()
+      })
+    )
+    return
+  }
+
+  // Static assets (JS/CSS/images/fonts/etc.): network-first, cache on success,
+  // fall back to cache when offline.
   event.respondWith(
     fetch(request)
       .then((response) => {
@@ -39,12 +60,6 @@ self.addEventListener('fetch', (event) => {
       .catch(async () => {
         const cached = await caches.match(request)
         if (cached) return cached
-
-        if (request.mode === 'navigate') {
-          const offline = await caches.match('/offline.html')
-          if (offline) return offline
-        }
-
         throw new Error('Network unavailable and no cache match')
       })
   )
