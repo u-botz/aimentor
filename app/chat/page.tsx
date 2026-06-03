@@ -1,5 +1,6 @@
 'use client'
 
+import ReactMarkdown from 'react-markdown'
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { SendHorizontal, Square, Menu, X } from 'lucide-react'
@@ -48,24 +49,27 @@ const getTodayISTDate = () =>
 const LINE_HEIGHT_PX = 24
 const MAX_TEXTAREA_LINES = 4
 
-function renderMarkdown(text: string) {
-  const segments = text.split(/(\*\*[^*]+\*\*)/g)
-  return segments.map((segment, i) => {
-    if (segment.startsWith('**') && segment.endsWith('**')) {
-      return (
-        <strong key={i} className="font-semibold">
-          {segment.slice(2, -2)}
-        </strong>
-      )
-    }
-    const lines = segment.split('\n')
-    return lines.map((line, j) => (
-      <span key={`${i}-${j}`}>
-        {line}
-        {j < lines.length - 1 && <br />}
-      </span>
-    ))
-  })
+function MarkdownMessage({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      components={{
+        h1: ({ children }) => <h1 className="text-base font-bold mb-1 mt-2">{children}</h1>,
+        h2: ({ children }) => <h2 className="text-base font-bold mb-1 mt-2">{children}</h2>,
+        h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-2">{children}</h3>,
+        p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+        strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+        em: ({ children }) => <em className="italic">{children}</em>,
+        ul: ({ children }) => <ul className="list-disc pl-4 mb-1 space-y-0.5">{children}</ul>,
+        ol: ({ children }) => <ol className="list-decimal pl-4 mb-1 space-y-0.5">{children}</ol>,
+        li: ({ children }) => <li className="leading-snug">{children}</li>,
+        hr: () => <hr className="border-zinc-600 my-2" />,
+        code: ({ children }) => <code className="bg-zinc-800 px-1 rounded text-xs font-mono">{children}</code>,
+        pre: ({ children }) => <pre className="bg-zinc-800 p-2 rounded text-xs font-mono overflow-x-auto mb-1">{children}</pre>,
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  )
 }
 
 function TypingIndicator() {
@@ -118,6 +122,15 @@ function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // ── Document title ───────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    document.title =
+      mode === 'debrief' ? 'Nightly Debrief'
+      : mode === 'morning' ? 'Morning Planning'
+      : 'Open Chat'
+  }, [mode])
 
   // ── Scroll ──────────────────────────────────────────────────────────────────
 
@@ -350,6 +363,7 @@ function ChatPage() {
         const newId = await ensureSession(mode)
         if (!newId) throw new Error('Could not create session')
         activeSessionId = newId
+        fetchSessions()
       }
 
       const res = await fetch('/api/chat', {
@@ -422,6 +436,10 @@ function ChatPage() {
         sessions={sessions}
         activeSessionId={sessionId}
         onSelectSession={loadSession}
+        onDeleteSession={(id) => {
+          setSessions((prev) => prev.filter((s) => s.id !== id))
+          if (id === sessionId) createNewSession('open_chat')
+        }}
         onNewChat={handleSmartCTA}
         hasDebriefedToday={hasDebriefedToday}
         isDebriefTime={isDebriefTime}
@@ -533,7 +551,7 @@ function ChatPage() {
                       : 'border border-zinc-700/40 bg-[#1a1a2e] text-zinc-100'
                   )}
                 >
-                  {renderMarkdown(msg.content)}
+                  <MarkdownMessage content={msg.content} />
                 </div>
               </div>
             ))}

@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, X, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AppShell } from '@/components/AppShell'
@@ -23,12 +23,11 @@ type ProfileResponse = {
 }
 
 export default function ProfilePage() {
-  const router = useRouter()
-
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [name, setName] = useState('')
   const [age, setAge] = useState('')
@@ -70,6 +69,7 @@ export default function ProfilePage() {
       })
     return () => {
       cancelled = true
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
     }
   }, [])
 
@@ -92,9 +92,12 @@ export default function ProfilePage() {
     }
   }
 
+  const ageNum = Number(age)
+  const ageValid = age !== '' && ageNum >= 1 && ageNum <= 120
+
   const canSave =
     name.trim().length > 0 &&
-    age !== '' &&
+    ageValid &&
     role.trim().length > 0 &&
     primaryGoal.trim().length > 0 &&
     nonNegotiables.length > 0 &&
@@ -133,7 +136,8 @@ export default function ProfilePage() {
       }
 
       setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+      savedTimerRef.current = setTimeout(() => setSaved(false), 2500)
     } catch (err) {
       console.error('Profile save error:', err)
       setError('Something went wrong. Please try again.')
@@ -157,17 +161,24 @@ export default function ProfilePage() {
 
   return (
     <AppShell>
+      {/* Save toast */}
+      {saved && (
+        <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
+          <Check className="h-4 w-4" />
+          Changes saved
+        </div>
+      )}
+
       <div className="mx-auto w-full max-w-[480px] flex-1 px-5 py-8">
         {/* Header */}
         <div className="mb-8 flex items-center gap-3 pl-8 md:pl-0">
-          <button
-            type="button"
-            onClick={() => router.push('/dashboard')}
+          <Link
+            href="/dashboard"
             aria-label="Back to dashboard"
             className="rounded-lg border border-zinc-800 p-2 text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
           >
             <ChevronLeft className="h-4 w-4" />
-          </button>
+          </Link>
           <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>
         </div>
 
@@ -177,26 +188,42 @@ export default function ProfilePage() {
             <h2 className="text-xs font-semibold uppercase tracking-wider text-[#2E5BFF]">
               Basic info
             </h2>
-            <label className="block space-y-2">
-              <span className="text-sm text-zinc-400">Name</span>
+            <div className="space-y-2">
+              <label htmlFor="profile-name" className="text-sm text-zinc-400">Name</label>
               <input
+                id="profile-name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF]"
+                className={cn(
+                  'w-full rounded-lg border bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:ring-1',
+                  name.trim().length === 0
+                    ? 'border-red-500/70 focus:border-red-500 focus:ring-red-500'
+                    : 'border-zinc-800 focus:border-[#2E5BFF] focus:ring-[#2E5BFF]'
+                )}
               />
-            </label>
-            <label className="block space-y-2">
-              <span className="text-sm text-zinc-400">Age</span>
+              {name.trim().length === 0 && (
+                <p className="text-xs text-red-400">Name is required.</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="profile-age" className="text-sm text-zinc-400">Age</label>
               <input
+                id="profile-age"
                 type="number"
-                min={13}
-                max={120}
                 value={age}
                 onChange={(e) => setAge(e.target.value)}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF]"
+                className={cn(
+                  'w-full rounded-lg border bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:ring-1',
+                  age !== '' && !ageValid
+                    ? 'border-red-500/70 focus:border-red-500 focus:ring-red-500'
+                    : 'border-zinc-800 focus:border-[#2E5BFF] focus:ring-[#2E5BFF]'
+                )}
               />
-            </label>
+              {age !== '' && !ageValid && (
+                <p className="text-xs text-red-400">Age must be between 1 and 120.</p>
+              )}
+            </div>
             <label className="block space-y-2">
               <span className="text-sm text-zinc-400">Current role</span>
               <input
@@ -251,7 +278,7 @@ export default function ProfilePage() {
                 {nonNegotiables.map((rule) => (
                   <span
                     key={rule}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700/50 bg-[#1a1a2e] px-3 py-1.5 text-sm"
+                    className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-zinc-700/50 bg-[#1a1a2e] px-3 py-1.5 text-sm"
                   >
                     {rule}
                     <button

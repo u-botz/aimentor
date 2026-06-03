@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useUser, UserButton } from '@clerk/nextjs'
@@ -9,6 +10,7 @@ import {
   MessageCircle,
   LayoutDashboard,
   User,
+  Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -35,6 +37,7 @@ type AppSidebarProps = {
   sessions?: SessionSummary[]
   activeSessionId?: string
   onSelectSession?: (s: SessionSummary) => void
+  onDeleteSession?: (id: string) => void
   onNewChat?: () => void
   hasDebriefedToday?: boolean
   isDebriefTime?: boolean
@@ -67,6 +70,7 @@ export function AppSidebar({
   sessions: sessionsProp,
   activeSessionId,
   onSelectSession,
+  onDeleteSession,
   onNewChat,
   hasDebriefedToday: debriefedProp,
   isDebriefTime: debriefTimeProp,
@@ -134,18 +138,28 @@ export function AppSidebar({
     (s: SessionSummary) => {
       if (onSelectSession) {
         onSelectSession(s)
-        return
       }
-      onClose()
-      router.push(`/chat?session=${s.id}`)
     },
-    [onSelectSession, onClose, router]
+    [onSelectSession]
   )
 
-  const navTo = (path: string) => {
-    onClose()
-    router.push(path)
-  }
+  const handleDelete = useCallback(
+    async (e: React.MouseEvent, id: string) => {
+      e.preventDefault()
+      e.stopPropagation()
+      try {
+        await fetch(`/api/sessions/${id}`, { method: 'DELETE' })
+        if (interactive) {
+          onDeleteSession?.(id)
+        } else {
+          setNavSessions((prev) => prev.filter((s) => s.id !== id))
+        }
+      } catch (err) {
+        console.error('Delete session error:', err)
+      }
+    },
+    [interactive, onDeleteSession]
+  )
 
   return (
     <>
@@ -199,35 +213,69 @@ export function AppSidebar({
           <ul className="flex flex-col gap-0.5 px-2">
             {sessions.map((s) => {
               const isActive = s.id === activeSessionId
-              const title = s.first_message
-                ? s.first_message.slice(0, 40) +
-                  (s.first_message.length > 40 ? '…' : '')
-                : 'New conversation'
+              const modeLabel =
+                s.mode === 'debrief' ? 'Nightly Debrief'
+                : s.mode === 'morning' ? 'Morning Planning'
+                : 'Open Chat'
+              const shortDate = new Date(s.created_at).toLocaleDateString(
+                'en-US', { month: 'short', day: 'numeric' }
+              )
+              const msg = s.first_message?.trim() ?? ''
+              const title =
+                msg.length >= 15
+                  ? msg.slice(0, 40) + (msg.length > 40 ? '…' : '')
+                  : msg.length > 0
+                    ? `${modeLabel}: ${msg}`
+                    : `${modeLabel} · ${shortDate}`
+              const itemClass = cn(
+                'block w-full rounded-lg px-3 py-2.5 text-left transition-colors border-l-2',
+                isActive
+                  ? 'border-[#2E5BFF] bg-[#1a1a2e] text-zinc-100'
+                  : 'border-transparent text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
+              )
+              const itemContent = (
+                <>
+                  <div className="flex items-center gap-2 mb-0.5 pr-5">
+                    {s.mode === 'debrief' ? (
+                      <Moon className="h-3 w-3 shrink-0 text-zinc-500" />
+                    ) : (
+                      <MessageCircle className="h-3 w-3 shrink-0 text-zinc-500" />
+                    )}
+                    <span className="truncate text-xs font-medium leading-tight">
+                      {title}
+                    </span>
+                  </div>
+                  <p className="pl-5 text-[10px] text-zinc-600">
+                    {relativeDate(s.created_at)}
+                  </p>
+                </>
+              )
               return (
-                <li key={s.id}>
+                <li key={s.id} className="group relative">
+                  {interactive ? (
+                    <button
+                      type="button"
+                      onClick={() => handleSelect(s)}
+                      className={itemClass}
+                    >
+                      {itemContent}
+                    </button>
+                  ) : (
+                    <Link
+                      href={`/chat?session=${s.id}`}
+                      onClick={onClose}
+                      className={itemClass}
+                    >
+                      {itemContent}
+                    </Link>
+                  )}
                   <button
                     type="button"
-                    onClick={() => handleSelect(s)}
-                    className={cn(
-                      'w-full rounded-lg px-3 py-2.5 text-left transition-colors border-l-2',
-                      isActive
-                        ? 'border-[#2E5BFF] bg-[#1a1a2e] text-zinc-100'
-                        : 'border-transparent text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
-                    )}
+                    onClick={(e) => handleDelete(e, s.id)}
+                    aria-label="Delete session"
+                    className="invisible absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-600 opacity-0 transition-opacity hover:text-red-400 group-hover:visible group-hover:opacity-100"
                   >
-                    <div className="flex items-center gap-2 mb-0.5">
-                      {s.mode === 'debrief' ? (
-                        <Moon className="h-3 w-3 shrink-0 text-zinc-500" />
-                      ) : (
-                        <MessageCircle className="h-3 w-3 shrink-0 text-zinc-500" />
-                      )}
-                      <span className="truncate text-xs font-medium leading-tight">
-                        {title}
-                      </span>
-                    </div>
-                    <p className="pl-5 text-[10px] text-zinc-600">
-                      {relativeDate(s.created_at)}
-                    </p>
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </li>
               )
@@ -237,9 +285,9 @@ export function AppSidebar({
 
         {/* Bottom — nav links + user */}
         <div className="shrink-0 border-t border-zinc-800/40 px-4 py-3">
-          <button
-            type="button"
-            onClick={() => navTo('/dashboard')}
+          <Link
+            href="/dashboard"
+            onClick={onClose}
             className={cn(
               'mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors',
               pathname === '/dashboard'
@@ -249,10 +297,10 @@ export function AppSidebar({
           >
             <LayoutDashboard className="h-4 w-4 shrink-0" />
             Dashboard
-          </button>
-          <button
-            type="button"
-            onClick={() => navTo('/profile')}
+          </Link>
+          <Link
+            href="/profile"
+            onClick={onClose}
             className={cn(
               'mb-3 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors',
               pathname === '/profile'
@@ -262,7 +310,7 @@ export function AppSidebar({
           >
             <User className="h-4 w-4 shrink-0" />
             Profile
-          </button>
+          </Link>
           <div className="flex items-center gap-2.5">
             {isLoaded && <UserButton />}
             <div className="min-w-0">

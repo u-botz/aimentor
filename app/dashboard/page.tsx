@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
@@ -169,14 +170,13 @@ export default function DashboardPage() {
             </h1>
             <p className="mt-0.5 truncate text-sm text-zinc-400">{momentLine}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => router.push('/profile')}
+          <Link
+            href="/profile"
             aria-label="Profile"
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-800 text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
           >
             <User className="h-4 w-4" />
-          </button>
+          </Link>
         </header>
 
         {/* 2. Context line */}
