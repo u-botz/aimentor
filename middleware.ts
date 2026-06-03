@@ -6,6 +6,11 @@ const isPublicRoute = createRouteMatcher([
   '/',
   '/sign-in(.*)',
   '/sign-up(.*)',
+  // PWA manifest must be publicly fetchable. It ends in `.json`, which the
+  // config matcher does NOT exclude (that exclusion is `webmanifest` only), so
+  // without this Clerk redirects the manifest request to sign-in and Chrome
+  // marks the app "not installable" on Android/desktop.
+  '/manifest.json',
 ])
 
 const isOnboardingExempt = createRouteMatcher([
@@ -15,6 +20,16 @@ const isOnboardingExempt = createRouteMatcher([
 ])
 
 export default clerkMiddleware(async (auth, request) => {
+  // Signed-in users skip the marketing landing page and go straight to the app.
+  // This also covers the PWA launch, whose start_url is "/".
+  if (request.nextUrl.pathname === '/') {
+    const { userId } = await auth()
+    if (userId) {
+      return NextResponse.redirect(new URL('/dashboard', request.url))
+    }
+    return // anonymous visitor → show the landing page
+  }
+
   if (isPublicRoute(request)) return
 
   const { userId } = await auth.protect()
