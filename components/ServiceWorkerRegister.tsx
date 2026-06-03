@@ -34,22 +34,45 @@ async function subscribeAndSave(registration: ServiceWorkerRegistration) {
   })
 }
 
+/**
+ * Call this from a user gesture (a tap/click). iOS Safari only prompts for
+ * notification permission inside a gesture handler, and only when the app is
+ * installed to the home screen — so this MUST NOT run on page load.
+ * Returns the resulting permission so callers can update their UI.
+ */
+export async function enableNotifications(): Promise<NotificationPermission> {
+  if (!('serviceWorker' in navigator) || !('Notification' in window)) {
+    return 'denied'
+  }
+  try {
+    const registration = await navigator.serviceWorker.ready
+    const permission = await Notification.requestPermission()
+    if (permission === 'granted') {
+      await subscribeAndSave(registration)
+    }
+    return permission
+  } catch (err) {
+    console.error('enableNotifications failed:', err)
+    return Notification.permission
+  }
+}
+
 export function ServiceWorkerRegister() {
   useEffect(() => {
-    if (!('serviceWorker' in navigator) || !('Notification' in window)) return
+    if (!('serviceWorker' in navigator)) return
 
     async function register() {
       try {
         const registration = await navigator.serviceWorker.register('/sw.js')
-        const permission = Notification.permission
 
-        if (permission === 'granted') {
+        // Only RE-subscribe silently when the user has already granted
+        // permission on a previous visit. Never call requestPermission() on
+        // mount — iOS ignores non-gesture requests, and it's hostile on Android.
+        if (
+          'Notification' in window &&
+          Notification.permission === 'granted'
+        ) {
           await subscribeAndSave(registration)
-        } else if (permission === 'default') {
-          const result = await Notification.requestPermission()
-          if (result === 'granted') {
-            await subscribeAndSave(registration)
-          }
         }
       } catch (err) {
         console.error('Service worker registration failed:', err)

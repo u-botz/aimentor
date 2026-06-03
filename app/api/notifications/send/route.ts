@@ -30,7 +30,7 @@ export async function POST(req: Request) {
       .from('push_subscriptions')
       .select('subscription')
       .eq('user_id', userId)
-      .single()
+      .maybeSingle()
 
     if (error || !row?.subscription) {
       return new Response('Subscription not found', { status: 404 })
@@ -42,10 +42,23 @@ export async function POST(req: Request) {
       process.env.VAPID_PRIVATE_KEY!
     )
 
-    await webpush.sendNotification(
-      row.subscription as webpush.PushSubscription,
-      JSON.stringify({ title, body, url })
-    )
+    try {
+      await webpush.sendNotification(
+        row.subscription as webpush.PushSubscription,
+        JSON.stringify({ title, body, url })
+      )
+    } catch (err) {
+      // Clean up an expired/invalid subscription so it isn't retried.
+      const statusCode = (err as { statusCode?: number })?.statusCode
+      if (statusCode === 404 || statusCode === 410) {
+        await supabaseAdmin
+          .from('push_subscriptions')
+          .delete()
+          .eq('user_id', userId)
+        return new Response('Subscription expired', { status: 410 })
+      }
+      throw err
+    }
 
     return Response.json({ success: true })
   } catch (error) {

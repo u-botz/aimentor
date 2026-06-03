@@ -159,40 +159,80 @@ Answer these questions in JSON:
       })
       .filter((c) => c.text.length > 0)
 
-    // ── Step 5: Parallel DB updates ───────────────────────────────────────────
+    // ── Step 5: Debrief log first (before session_summaries) ──────────────────
+    // Must run before the session_summaries insert. The idempotency guard at
+    // Step 1 keys on session_summaries, so if debrief_logs fails and
+    // session_summaries was already written, the session is permanently skipped
+    // on all future retries. By running debrief_logs first and separately, a
+    // failure here prevents session_summaries from being written and the whole
+    // extraction can be safely retried.
+    if (mode === 'debrief') {
+      const { error: debriefError } = await supabaseAdmin
+        .from('debrief_logs')
+        .upsert(
+          {
+            user_id: userId,
+            session_id: sessionId,
+            debrief_date: today,
+            score: s.score_overall ?? null,
+            win: s.win ?? null,
+            failure: s.failure ?? null,
+            tomorrow_priority: s.tomorrow_priority ?? null,
+            daily_spend: s.daily_spend ?? null,
+            expense_notes: s.expense_notes ?? null,
+            finance_violation: s.finance_violation ?? false,
+            violation_detail: s.violation_detail ?? null,
+            mental_state_score: null,
+            completed: true,
+          },
+          { onConflict: 'user_id,debrief_date' }
+        )
+
+      if (debriefError) {
+        console.error(
+          `[extract] debrief_logs upsert failed for session ${sessionId}:`,
+          debriefError
+        )
+        throw new Error('DB error')
+      }
+    }
+
+    // ── Step 6: Remaining parallel DB updates ─────────────────────────────────
     // Wrap each supabase builder in Promise.resolve so TypeScript sees a real Promise
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const wrap = (q: PromiseLike<any>) => Promise.resolve(q) as Promise<{ error: any }>
 
-    const ops: Promise<{ error: unknown }>[] = [
+    type NamedOp = { name: string; promise: Promise<{ error: unknown }> }
+
+    const namedOps: NamedOp[] = [
       // a. Append new pattern
       ...(extracted.new_pattern
-        ? [wrap(supabaseAdmin
+        ? [{ name: 'pattern', promise: wrap(supabaseAdmin
             .from('users')
             .update({ identity_patterns: [...identity_patterns, extracted.new_pattern] })
-            .eq('id', userId))]
+            .eq('id', userId)) }]
         : []),
 
       // b. Append new strength
       ...(extracted.new_strength
-        ? [wrap(supabaseAdmin
+        ? [{ name: 'strength', promise: wrap(supabaseAdmin
             .from('users')
             .update({ identity_strengths: [...identity_strengths, extracted.new_strength] })
-            .eq('id', userId))]
+            .eq('id', userId)) }]
         : []),
 
-      // c. Insert into session_summaries — always write a row so the idempotency
-      //    guard above fires correctly even when carry_forward is null.
-      wrap(supabaseAdmin.from('session_summaries').insert({
+      // c. Insert into session_summaries — always write so the idempotency guard
+      //    fires correctly on future calls. Written after debrief_logs succeeds.
+      { name: 'session_summaries', promise: wrap(supabaseAdmin.from('session_summaries').insert({
         user_id: userId,
         session_id: sessionId,
         summary_date: today,
         summary: extracted.carry_forward ?? '',
-      })),
+      })) },
 
       // d. Insert new commitments
       ...(newCommitments.length > 0 && !commitmentsAlreadyInserted
-        ? [wrap(supabaseAdmin.from('open_commitments').insert(
+        ? [{ name: 'commitments_insert', promise: wrap(supabaseAdmin.from('open_commitments').insert(
             newCommitments.map((c) => ({
               user_id: userId,
               session_id: sessionId,
@@ -201,56 +241,35 @@ Answer these questions in JSON:
               made_on: today,
               status: 'open',
             }))
-          ))]
+          )) }]
         : []),
 
       // e. Mark resolved commitments as completed
       ...(extracted.commitments_resolved?.length > 0
-        ? extracted.commitments_resolved.map((item) =>
-            wrap(supabaseAdmin
+        ? extracted.commitments_resolved.map((item) => ({
+            name: `resolve:${item.slice(0, 30)}`,
+            promise: wrap(supabaseAdmin
               .from('open_commitments')
               .update({ status: 'completed', resolved_on: today })
               .eq('user_id', userId)
               .eq('status', 'open')
-              .ilike('commitment', `%${item}%`))
-          )
-        : []),
-
-      // f. Upsert debrief_logs for debrief sessions.
-      // Always log a completed debrief — even if no numeric score was inferred —
-      // so the day still counts toward streaks and captures tomorrow's priority.
-      // Open chats never produce a debrief log.
-      ...(mode === 'debrief'
-        ? [wrap(supabaseAdmin.from('debrief_logs').upsert(
-            {
-              user_id: userId,
-              session_id: sessionId,
-              debrief_date: today,
-              score_overall: s.score_overall ?? null,
-              hydration_litres: s.hydration_litres ?? null,
-              sleep_hours: s.sleep_hours ?? null,
-              dairy_violation: s.dairy_violation ?? false,
-              workout_done: s.workout_done ?? false,
-              win: s.win ?? null,
-              failure: s.failure ?? null,
-              tomorrow_priority: s.tomorrow_priority ?? null,
-              daily_spend: s.daily_spend ?? null,
-              expense_notes: s.expense_notes ?? null,
-              finance_violation: s.finance_violation ?? false,
-              violation_detail: s.violation_detail ?? null,
-              completed: true,
-            },
-            { onConflict: 'user_id,debrief_date' }
-          ))]
+              .ilike('commitment', `%${item}%`)),
+          }))
         : []),
     ]
 
-    const results = await Promise.all(ops)
-    const failed = results.find((r) => r?.error)
-    if (failed) {
-      console.error('DB operation failed:', failed.error)
-      throw new Error('DB error')
-    }
+    const results = await Promise.all(namedOps.map((o) => o.promise))
+    let anyFailed = false
+    results.forEach((r, i) => {
+      if (r?.error) {
+        console.error(
+          `[extract] DB op "${namedOps[i].name}" failed for session ${sessionId}:`,
+          r.error
+        )
+        anyFailed = true
+      }
+    })
+    if (anyFailed) throw new Error('DB error')
 
     return {
       new_pattern: extracted.new_pattern,

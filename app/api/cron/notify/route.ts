@@ -47,6 +47,15 @@ function urlForKind(kind: NotificationKind): string {
   return '/chat'
 }
 
+// Postgres `time` columns come back as "HH:MM:SS"; a <input type="time"> stores
+// "HH:MM". Normalize both sides to "HH:MM" so the exact-time match is reliable.
+function normalizeTime(t: string | null): string | null {
+  if (!t) return null
+  const m = t.match(/^(\d{1,2}):(\d{2})/)
+  if (!m) return null
+  return `${m[1].padStart(2, '0')}:${m[2]}`
+}
+
 // ── Route ─────────────────────────────────────────────────────────────────────
 
 export async function GET(req: Request) {
@@ -127,15 +136,18 @@ export async function GET(req: Request) {
         const toSend: { kind: NotificationKind; context: string }[] = []
 
         // ── Exact-time triggers (independent) ────────────────────────────────
+        const morningTime = normalizeTime(user.morning_time)
+        const reminderTime = normalizeTime(user.reminder_time)
+
         if (
           user.morning_enabled === true &&
-          currentTime === user.morning_time &&
+          currentTime === morningTime &&
           notSent('morning')
         ) {
           toSend.push({ kind: 'morning', context: 'start of day' })
         }
 
-        if (currentTime === user.reminder_time && notSent('debrief')) {
+        if (currentTime === reminderTime && notSent('debrief')) {
           toSend.push({
             kind: 'debrief',
             context: `end of day check-in, current time ${currentTime}`,
@@ -237,6 +249,17 @@ export async function GET(req: Request) {
 
             sent += 1
           } catch (err) {
+            // 404/410 mean the push subscription is gone — delete it so we stop
+            // retrying a dead endpoint every run.
+            const statusCode = (err as { statusCode?: number })?.statusCode
+            if (statusCode === 404 || statusCode === 410) {
+              await supabaseAdmin
+                .from('push_subscriptions')
+                .delete()
+                .eq('user_id', userId)
+              console.warn(`Removed expired subscription for user ${userId}`)
+              break
+            }
             console.error(
               `Notify failed — user ${userId} kind ${kind}:`,
               err

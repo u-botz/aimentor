@@ -7,6 +7,7 @@ import { useUser } from '@clerk/nextjs'
 import { Sunrise, MessageCircle, Moon, Flame, Wallet, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AppShell } from '@/components/AppShell'
+import { NotificationOptIn } from '@/components/NotificationOptIn'
 
 type Period = 'morning' | 'day' | 'evening'
 
@@ -183,6 +184,9 @@ export default function DashboardPage() {
         {contextLine && (
           <p className="-mt-2 text-xs text-zinc-500">{contextLine}</p>
         )}
+
+        {/* 2b. Notification opt-in (gesture-driven; required for iOS) */}
+        <NotificationOptIn />
 
         {/* 3. Primary action */}
         <button
