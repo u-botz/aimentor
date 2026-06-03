@@ -9,6 +9,9 @@ export type LastSession = {
   date: string
   carry_forward: string
   tomorrow_priority: string | null
+  closed_at: string | null
+  mode: string | null
+  completed: boolean | null
 }
 
 export type OpenCommitment = {
@@ -62,7 +65,10 @@ Be warm. Establish your character early. Ask what's on their mind.
   const lastSessionText = lastSession
     ? `DATE: ${new Date(lastSession.date).toDateString()}
 NOTE: ${lastSession.carry_forward}
-PRIORITY SET: ${lastSession.tomorrow_priority ?? 'Not set'}`
+PRIORITY SET: ${lastSession.tomorrow_priority ?? 'Not set'}
+LAST CLOSED: ${lastSession.closed_at ?? 'unknown'}
+SESSION MODE: ${lastSession.mode ?? 'unknown'}
+DEBRIEF COMPLETED: ${lastSession.completed === null ? 'n/a' : lastSession.completed ? 'yes' : 'no'}`
     : 'No previous sessions yet'
 
   return `

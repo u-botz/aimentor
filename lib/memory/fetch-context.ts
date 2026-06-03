@@ -10,7 +10,8 @@ export async function fetchMemoryContext(userId: string): Promise<{
   lastSession: LastSession | null
   openCommitments: OpenCommitment[]
 }> {
-  const [userRes, summaryRes, debriefRes, commitmentsRes] = await Promise.all([
+  const [userRes, summaryRes, debriefRes, commitmentsRes, lastClosedRes] =
+    await Promise.all([
     supabaseAdmin
       .from('users')
       .select('name, identity_patterns, identity_strengths, medium_term_memory')
@@ -41,6 +42,16 @@ export async function fetchMemoryContext(userId: string): Promise<{
       .eq('status', 'open')
       .order('made_on', { ascending: false })
       .limit(5),
+
+    supabaseAdmin
+      .from('sessions')
+      .select('mode, closed_at, debrief_date')
+      .eq('user_id', userId)
+      .eq('status', 'closed')
+      .not('closed_at', 'is', null)
+      .order('closed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ])
 
   const u = userRes.data
@@ -53,6 +64,18 @@ export async function fetchMemoryContext(userId: string): Promise<{
 
   const lastSummary = summaryRes.data
   const lastDebrief = debriefRes.data
+  const lastClosed = lastClosedRes.data
+
+  let lastDebriefCompleted: boolean | null = null
+  if (lastClosed?.mode === 'debrief' && lastClosed.debrief_date) {
+    const { data: debriefLog } = await supabaseAdmin
+      .from('debrief_logs')
+      .select('completed')
+      .eq('user_id', userId)
+      .eq('debrief_date', lastClosed.debrief_date)
+      .maybeSingle()
+    lastDebriefCompleted = debriefLog?.completed ?? false
+  }
 
   let lastSession: LastSession | null = null
   if (lastSummary || lastDebrief) {
@@ -60,6 +83,9 @@ export async function fetchMemoryContext(userId: string): Promise<{
       date: lastDebrief?.debrief_date ?? lastSummary?.summary_date ?? '',
       carry_forward: lastSummary?.summary ?? '',
       tomorrow_priority: lastDebrief?.tomorrow_priority ?? null,
+      closed_at: lastClosed?.closed_at ?? null,
+      mode: lastClosed?.mode ?? null,
+      completed: lastDebriefCompleted,
     }
   }
 
