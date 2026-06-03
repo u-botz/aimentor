@@ -48,6 +48,7 @@ export async function PATCH(req: Request) {
       role: string
       primary_goal: string
       non_negotiables: string[]
+      tracked_domains: string[]
       strictness: number
       communication_style: string
       reminder_time: string
@@ -63,6 +64,7 @@ export async function PATCH(req: Request) {
       'role',
       'primary_goal',
       'non_negotiables',
+      'tracked_domains',
       'strictness',
       'communication_style',
       'reminder_time',

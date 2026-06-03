@@ -123,6 +123,8 @@ function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // Guards the proactive opener so the mentor greets exactly once per new session.
+  const kickedOffRef = useRef(false)
 
   // ── Document title ───────────────────────────────────────────────────────────
 
@@ -240,6 +242,8 @@ function ChatPage() {
     setSessionSaved(false)
     setConfirmEnd(false)
     setSidebarOpen(false)
+    // Allow the next proactive session to open with a mentor greeting.
+    kickedOffRef.current = false
   }, [])
 
   const handleSmartCTA = useCallback(() => {
@@ -270,6 +274,65 @@ function ChatPage() {
       return null
     }
   }, [])
+
+  // ── Proactive opener — mentor speaks first in morning/debrief sessions ────────
+  // Creates the session, then asks the API for an opening turn with no user
+  // message. The server injects a synthetic (unsaved, hidden) opener so Claude
+  // produces the first message.
+
+  const kickoffSession = useCallback(
+    async (currentMode: SessionMode) => {
+      setIsLoading(true)
+      try {
+        const newId = await ensureSession(currentMode)
+        if (!newId) throw new Error('Could not create session')
+        fetchSessions()
+
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: [], sessionId: newId, mode: currentMode }),
+        })
+        if (!res.ok || !res.body) {
+          throw new Error(`Kickoff request failed: ${res.status}`)
+        }
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let assistantContent = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          assistantContent += decoder.decode(value, { stream: true })
+          const content = assistantContent
+          setMessages((prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.role === 'assistant') {
+              const updated = [...prev]
+              updated[updated.length - 1] = { role: 'assistant', content }
+              return updated
+            }
+            return [...prev, { role: 'assistant', content }]
+          })
+        }
+
+        fetchSessions()
+      } catch (err) {
+        console.error('Kickoff error:', err)
+        // Drop an empty assistant bubble and allow a retry.
+        setMessages((prev) =>
+          prev[prev.length - 1]?.role === 'assistant' &&
+          prev[prev.length - 1].content === ''
+            ? prev.slice(0, -1)
+            : prev
+        )
+        kickedOffRef.current = false
+      } finally {
+        setIsLoading(false)
+      }
+    },
+    [ensureSession, fetchSessions]
+  )
 
   // ── Load historical session ──────────────────────────────────────────────────
 
@@ -310,6 +373,26 @@ function ChatPage() {
       loadSession(summary)
     }
   }, [sessionParam, sessions, sessionId, loadSession])
+
+  // ── Trigger the proactive opener for a fresh morning/debrief session ──────────
+  useEffect(() => {
+    if (mode === 'open_chat') return // open chat stays user-led
+    if (sessionParam) return // opening a specific historical session
+    if (sessionId) return // session already exists (loaded or kicked off)
+    if (messages.length > 0) return
+    if (isLoading || loadingSession) return
+    if (kickedOffRef.current) return
+    kickedOffRef.current = true
+    kickoffSession(mode)
+  }, [
+    mode,
+    sessionParam,
+    sessionId,
+    messages.length,
+    isLoading,
+    loadingSession,
+    kickoffSession,
+  ])
 
   // ── End debrief session ──────────────────────────────────────────────────────
 

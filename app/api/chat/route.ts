@@ -7,6 +7,24 @@ import { rewriteMemory } from '@/lib/memory/rewrite'
 import { MORNING_PRIORITY_EXTRACT_PROMPT } from '@/lib/prompts/layer4-mode'
 import { istDateString } from '@/lib/date'
 
+type ChatMsg = { role: 'user' | 'assistant'; content: string }
+
+// The Anthropic API requires the first message to be from the user. When the
+// mentor opens the conversation proactively (notification → empty chat), the
+// stored transcript starts with an assistant turn, so we prepend a synthetic
+// user "opener" that cues the mentor to speak first. This opener is sent to the
+// model only — it is never saved to the DB and never shown in the UI.
+function withLeadingUser(messages: ChatMsg[], mode: SessionMode): ChatMsg[] {
+  if (messages.length > 0 && messages[0].role === 'user') return messages
+  const opener =
+    mode === 'morning'
+      ? '(I just opened the app for my morning check-in. Start us off.)'
+      : mode === 'debrief'
+        ? "(I just opened the app for tonight's debrief. Start us off.)"
+        : '(I just opened the app. Start us off.)'
+  return [{ role: 'user', content: opener }, ...messages]
+}
+
 // Silently extract today's committed priority + intention from a morning
 // conversation and upsert it into daily_plans (last write wins). A failure here
 // must never break the chat response, so all callers wrap this in try/catch.
@@ -103,7 +121,8 @@ export async function POST(req: Request) {
       mode,
     })
 
-    // 6. Save user message to DB
+    // 6. Save user message to DB (skip when the mentor is opening — no real
+    //    user message exists yet for a proactive opener).
     const lastMessage = messages[messages.length - 1]
     if (lastMessage?.role === 'user') {
       await supabaseAdmin.from('messages').insert({
@@ -115,7 +134,7 @@ export async function POST(req: Request) {
     }
 
     // 6b. Every 3rd message, trigger memory rewrite in the background (fire-and-forget)
-    if (messages.length % 3 === 0) {
+    if (messages.length > 0 && messages.length % 3 === 0) {
       rewriteMemory(userId).catch((err) =>
         console.error('Background memory rewrite failed:', err)
       )
@@ -124,7 +143,7 @@ export async function POST(req: Request) {
     // 7. Call Claude API with streaming
     const stream = await streamChat(
       systemPrompt,
-      messages.map((m) => ({
+      withLeadingUser(messages, mode).map((m) => ({
         role: m.role,
         content: m.content,
       })),
@@ -158,7 +177,8 @@ export async function POST(req: Request) {
         })
 
         // Morning mode: silently capture today's plan. Never break the response.
-        if (mode === 'morning') {
+        // Skip on the proactive opener — there's no user input to extract yet.
+        if (mode === 'morning' && messages.length > 0) {
           try {
             await saveMorningPlan(userId, [
               ...messages,

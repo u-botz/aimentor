@@ -60,17 +60,34 @@ export async function runSessionExtraction(
     // ── Step 2: Fetch current user memory state ────────────────────────────────
     const { data: userData } = await supabaseAdmin
       .from('users')
-      .select('identity_patterns, identity_strengths, medium_term_memory')
+      .select('identity_patterns, identity_strengths, medium_term_memory, tracked_domains')
       .eq('id', userId)
       .single()
 
     const identity_patterns: string[] = userData?.identity_patterns ?? []
     const identity_strengths: string[] = userData?.identity_strengths ?? []
+    const tracked_domains: string[] = userData?.tracked_domains ?? ['work']
+    const trackHealth = tracked_domains.includes('health')
+    const trackFinance = tracked_domains.includes('finance')
 
     // ── Step 3: Claude extraction call ────────────────────────────────────────
     const conversationText = messages
       .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
       .join('\n')
+
+    const healthFields = trackHealth
+      ? `    "hydration_litres": <number or null>,
+    "sleep_hours": <number or null>,
+    "dairy_violation": <true or false>,
+    "workout_done": <true or false>,`
+      : ''
+
+    const financeFields = trackFinance
+      ? `    "daily_spend": <integer or null>,
+    "expense_notes": "string or null",
+    "finance_violation": <true or false>,
+    "violation_detail": "string or null"`
+      : ''
 
     const userPrompt = `TODAY'S DATE: ${istDateString()} (IST). Use this to resolve any relative deadlines into absolute YYYY-MM-DD dates.
 CURRENT KNOWN PATTERNS: ${identity_patterns.length ? identity_patterns.join(', ') : 'none'}
@@ -89,17 +106,11 @@ Answer these questions in JSON:
   "carry_forward": "one sentence — the single most important thing to remember from this conversation for future sessions",
   "structured": {
     "score_overall": <1-10 or null>,
-    "hydration_litres": <number or null>,
-    "sleep_hours": <number or null>,
-    "dairy_violation": <true or false>,
-    "workout_done": <true or false>,
     "win": "short string or null",
     "failure": "short string or null",
     "tomorrow_priority": "short string or null",
-    "daily_spend": <integer or null>,
-    "expense_notes": "string or null",
-    "finance_violation": <true or false>,
-    "violation_detail": "string or null"
+${healthFields}
+${financeFields}
   }
 }`
 

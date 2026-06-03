@@ -3,10 +3,10 @@
 import { useEffect, useState } from 'react'
 import { useUser } from '@clerk/nextjs'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft, X } from 'lucide-react'
+import { Briefcase, ChevronLeft, Heart, Wallet, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-const TOTAL_STEPS = 5
+const TOTAL_STEPS = 6
 
 const RULE_EXAMPLES = [
   'No junk food',
@@ -46,6 +46,7 @@ export default function OnboardingPage() {
   const [strictness, setStrictness] = useState(3)
   const [communicationStyle, setCommunicationStyle] =
     useState<CommunicationStyle>('Balanced')
+  const [trackedDomains, setTrackedDomains] = useState<string[]>(['work'])
   const [reminderTime, setReminderTime] = useState('22:00')
   const [morningTime, setMorningTime] = useState('08:00')
 
@@ -106,8 +107,10 @@ export default function OnboardingPage() {
       case 3:
         return nonNegotiables.length > 0
       case 4:
-        return communicationStyle.length > 0
+        return true // work is always on; health/finance are optional toggles
       case 5:
+        return communicationStyle.length > 0
+      case 6:
         return reminderTime.length > 0
       default:
         return false
@@ -134,6 +137,7 @@ export default function OnboardingPage() {
           role: role.trim(),
           primary_goal: primaryGoal.trim(),
           non_negotiables: nonNegotiables,
+          tracked_domains: trackedDomains,
           strictness,
           communication_style: communicationStyle,
           reminder_time: reminderTime,
@@ -352,6 +356,94 @@ export default function OnboardingPage() {
           )}
 
           {step === 4 && (
+            <div className="space-y-6">
+              <div>
+                <h1 className="text-xl font-semibold tracking-tight">
+                  What should your mentor track?
+                </h1>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Your mentor will ask about these every night in your debrief.
+                </p>
+              </div>
+              <div className="flex flex-col gap-3">
+                {/* Work & Priorities — locked on */}
+                <div className="flex items-start gap-4 rounded-xl border border-[#2E5BFF]/60 bg-[#2E5BFF]/10 px-4 py-3.5">
+                  <Briefcase className="mt-0.5 h-5 w-5 shrink-0 text-[#2E5BFF]" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-zinc-100">Work &amp; Priorities</p>
+                    <p className="text-xs text-zinc-500">Daily tasks, deep work, what got done</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-[#2E5BFF]/20 px-2 py-0.5 text-[10px] font-medium text-[#2E5BFF]">
+                    Always on
+                  </span>
+                </div>
+                {/* Health — toggle */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTrackedDomains((prev) =>
+                      prev.includes('health')
+                        ? prev.filter((d) => d !== 'health')
+                        : [...prev, 'health']
+                    )
+                  }
+                  className={cn(
+                    'flex items-start gap-4 rounded-xl border px-4 py-3.5 text-left transition-colors',
+                    trackedDomains.includes('health')
+                      ? 'border-[#2E5BFF]/60 bg-[#2E5BFF]/10'
+                      : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'
+                  )}
+                >
+                  <Heart className="mt-0.5 h-5 w-5 shrink-0 text-zinc-400" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-zinc-100">Health</p>
+                    <p className="text-xs text-zinc-500">Food, hydration, movement, sleep</p>
+                  </div>
+                  <span className={cn(
+                    'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium',
+                    trackedDomains.includes('health')
+                      ? 'bg-[#2E5BFF]/20 text-[#2E5BFF]'
+                      : 'bg-zinc-800 text-zinc-500'
+                  )}>
+                    {trackedDomains.includes('health') ? 'On' : 'Off'}
+                  </span>
+                </button>
+                {/* Finance — toggle */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTrackedDomains((prev) =>
+                      prev.includes('finance')
+                        ? prev.filter((d) => d !== 'finance')
+                        : [...prev, 'finance']
+                    )
+                  }
+                  className={cn(
+                    'flex items-start gap-4 rounded-xl border px-4 py-3.5 text-left transition-colors',
+                    trackedDomains.includes('finance')
+                      ? 'border-[#2E5BFF]/60 bg-[#2E5BFF]/10'
+                      : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'
+                  )}
+                >
+                  <Wallet className="mt-0.5 h-5 w-5 shrink-0 text-zinc-400" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-zinc-100">Finance</p>
+                    <p className="text-xs text-zinc-500">Daily spending, violations, expense tracking</p>
+                  </div>
+                  <span className={cn(
+                    'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium',
+                    trackedDomains.includes('finance')
+                      ? 'bg-[#2E5BFF]/20 text-[#2E5BFF]'
+                      : 'bg-zinc-800 text-zinc-500'
+                  )}>
+                    {trackedDomains.includes('finance') ? 'On' : 'Off'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 5 && (
             <div className="space-y-8">
               <div>
                 <h1 className="text-xl font-semibold tracking-tight">
@@ -411,7 +503,7 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {step === 5 && (
+          {step === 6 && (
             <div className="space-y-6">
               <div>
                 <h1 className="text-xl font-semibold tracking-tight">

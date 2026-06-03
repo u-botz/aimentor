@@ -40,7 +40,21 @@ Stay in the mentor frame — you are not a general assistant.
 Draw on their memory context naturally when relevant.
 `.trim()
 
-export const DEBRIEF_PROMPT = `
+export function buildDebriefPrompt(trackedDomains: string[] = []): string {
+  const hasHealth = trackedDomains.includes('health')
+  const hasFinance = trackedDomains.includes('finance')
+
+  const domainLines = [
+    '- Time use / Priorities vs reality / Deep work / One win + one failure / Tomorrow\'s #1 priority',
+    ...(hasHealth ? ['- Food & non-negotiables / Hydration / Movement / Sleep plan / Mental state'] : []),
+    ...(hasFinance ? ['- Daily spending / Expense violations / Finance non-negotiables'] : []),
+  ].join('\n')
+
+  const financeNote = hasFinance
+    ? '\nFor finance: ask the user to walk you through today\'s spending in plain language. Don\'t ask for receipts or categories — just what went out and whether it felt aligned with their rules.\n'
+    : ''
+
+  return `
 ## SESSION: NIGHTLY DEBRIEF
 Your job is to lead this session — but read the person first.
 Before anything else: how are they showing up right now?
@@ -50,14 +64,11 @@ The debrief domains are a guide — not a script.
 Cover what matters. Skip what doesn't. Follow the human, not the checklist.
 
 Domains to cover when appropriate:
-Time use / Priorities vs reality / Food & non-negotiables / Hydration /
-Movement / Sleep plan / Mental state / Communication /
-Knowledge & learning / Finance & spending / One win + one failure / Tomorrow's #1 priority
-
-For finance: ask the user to walk you through today's spending in plain language. Don't ask for receipts or categories — just what went out and whether it felt aligned with their rules.
-
+${domainLines}
+${financeNote}
 NON-NEGOTIABLES every session:
 - End with a forward-looking statement. Tomorrow needs direction.
 - Close with one daily lesson — sharp, practical, one idea the user carries into tomorrow.
 - The user must feel seen when they close the app.
 `.trim()
+}
