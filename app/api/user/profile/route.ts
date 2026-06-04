@@ -53,6 +53,7 @@ export async function PATCH(req: Request) {
       communication_style: string
       reminder_time: string
       morning_time: string
+      morning_enabled: boolean
       onboarded: boolean
     }>
 
@@ -69,6 +70,7 @@ export async function PATCH(req: Request) {
       'communication_style',
       'reminder_time',
       'morning_time',
+      'morning_enabled',
       'onboarded',
     ] as const
 

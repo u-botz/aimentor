@@ -8,10 +8,35 @@ import { cn } from '@/lib/utils'
 
 const TOTAL_STEPS = 6
 
-const RULE_EXAMPLES = [
-  'No junk food',
-  'Sleep before midnight',
-  '30 min workout daily',
+const RULE_SUGGESTIONS: { category: string; items: string[] }[] = [
+  {
+    category: 'Health',
+    items: [
+      'No junk food',
+      '8 hrs sleep',
+      '3L water daily',
+      'No alcohol',
+      '30 min workout',
+    ],
+  },
+  {
+    category: 'Work',
+    items: [
+      '2 hrs deep work daily',
+      'No phone before 9am',
+      'No social media before noon',
+      'Ship something every day',
+    ],
+  },
+  {
+    category: 'Finance',
+    items: [
+      'Log every expense daily',
+      'No impulse buy above ₹500',
+      'No food delivery more than 3x/week',
+      'Weekly spend under ₹3,000',
+    ],
+  },
 ]
 
 const GOAL_PLACEHOLDERS = [
@@ -19,6 +44,45 @@ const GOAL_PLACEHOLDERS = [
   'Build discipline around sleep and fitness',
   'Stop procrastinating on deep work',
 ]
+
+const GOAL_AREA_OPTIONS = [
+  'Consistency',
+  'Focus & work',
+  'Health',
+  'Finances',
+  'Relationships',
+  'Other',
+] as const
+
+const DEBRIEF_TIME_OPTIONS = [
+  { label: '9:00 PM',  value: '21:00', sub: 'Early wind-down' },
+  { label: '9:30 PM',  value: '21:30', sub: 'Before 10' },
+  { label: '10:00 PM', value: '22:00', sub: 'Most popular' },
+  { label: '10:30 PM', value: '22:30', sub: 'Late night' },
+]
+
+const MORNING_TIME_OPTIONS = [
+  { label: '7:00 AM', value: '07:00', sub: 'Early riser' },
+  { label: '8:00 AM', value: '08:00', sub: 'Most popular' },
+  { label: '9:00 AM', value: '09:00', sub: 'Slow start' },
+  { label: 'Off',     value: 'off',   sub: 'Skip mornings' },
+]
+
+const STRICTNESS_LABELS: Record<number, string> = {
+  1: 'Gentle — supportive first, never harsh',
+  2: "Soft — nudges you, doesn't push hard",
+  3: "Balanced — holds you to it, but won't pile on",
+  4: 'Strict — calls it out directly, no softening',
+  5: 'Very strict — no excuses, high standards always',
+}
+
+const STRICTNESS_PREVIEWS: Record<number, string> = {
+  1: "Hey — you missed your workout today. That's okay, rest days happen. What's the plan for tomorrow?",
+  2: "Workout didn't happen today. Worth checking in — is something getting in the way this week?",
+  3: "You skipped your workout again. That's three days in a row — what's actually getting in the way?",
+  4: "Three missed workouts. That's a pattern, not a blip. What are you going to do differently tomorrow?",
+  5: "Three days missed. No excuse changes that. What's the plan — and why will tomorrow be different?",
+}
 
 const ROLE_OPTIONS = [
   'Student',
@@ -51,14 +115,17 @@ export default function OnboardingPage() {
   const [role, setRole] = useState('')
   const [roleDetail, setRoleDetail] = useState('')
   const [primaryGoal, setPrimaryGoal] = useState('')
+  const [primaryGoalArea, setPrimaryGoalArea] = useState('')
+  const [goalDetail, setGoalDetail] = useState('')
   const [ruleInput, setRuleInput] = useState('')
   const [nonNegotiables, setNonNegotiables] = useState<string[]>([])
   const [strictness, setStrictness] = useState(3)
   const [communicationStyle, setCommunicationStyle] =
     useState<CommunicationStyle>('Balanced')
-  const [trackedDomains, setTrackedDomains] = useState<string[]>(['work'])
+  const [trackedDomains, setTrackedDomains] = useState<string[]>(['work', 'health'])
   const [reminderTime, setReminderTime] = useState('22:00')
   const [morningTime, setMorningTime] = useState('08:00')
+  const [morningEnabled, setMorningEnabled] = useState(true)
 
   useEffect(() => {
     fetch('/api/user/sync', { method: 'POST' }).catch(console.error)
@@ -113,9 +180,9 @@ export default function OnboardingPage() {
       case 1:
         return name.trim().length > 0 && age !== '' && role.trim().length > 0
       case 2:
-        return primaryGoal.trim().length > 0
+        return primaryGoalArea.trim().length > 0
       case 3:
-        return nonNegotiables.length > 0
+        return true
       case 4:
         return true // work is always on; health/finance are optional toggles
       case 5:
@@ -145,13 +212,16 @@ export default function OnboardingPage() {
           name: name.trim(),
           age: Number(age),
           role: roleDetail.trim() ? `${role} — ${roleDetail.trim()}` : role,
-          primary_goal: primaryGoal.trim(),
+          primary_goal: goalDetail.trim()
+            ? `${primaryGoalArea} — ${goalDetail.trim()}`
+            : primaryGoalArea,
           non_negotiables: nonNegotiables,
           tracked_domains: trackedDomains,
           strictness,
           communication_style: communicationStyle,
           reminder_time: reminderTime,
           morning_time: morningTime,
+          morning_enabled: morningEnabled,
           onboarded: true,
         }),
       })
@@ -281,28 +351,49 @@ export default function OnboardingPage() {
                   Your goal
                 </h1>
                 <p className="mt-1 text-sm text-zinc-500">
-                  What is the one thing you most want to improve?
+                  Pick the area you most want to work on.
                 </p>
               </div>
-              <textarea
-                value={primaryGoal}
-                onChange={(e) => setPrimaryGoal(e.target.value)}
-                rows={5}
-                placeholder="Describe your top priority..."
-                className="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-3 text-sm leading-relaxed outline-none placeholder:text-zinc-600 focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF]"
-              />
-              <div className="space-y-2">
-                <p className="text-xs text-zinc-500">Examples</p>
-                <ul className="space-y-1.5">
-                  {GOAL_PLACEHOLDERS.map((example) => (
-                    <li
-                      key={example}
-                      className="text-xs text-zinc-600 italic"
-                    >
-                      &ldquo;{example}&rdquo;
-                    </li>
-                  ))}
-                </ul>
+              <div className="space-y-3">
+                <span className="text-xs font-medium uppercase tracking-[0.04em] text-zinc-500">
+                  Area
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {GOAL_AREA_OPTIONS.map((option) => {
+                    const selected = primaryGoalArea === option
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setPrimaryGoalArea(option)}
+                        className={cn(
+                          'rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
+                          selected
+                            ? 'border-[#2E5BFF]/60 bg-[#2E5BFF]/10 text-zinc-100'
+                            : 'border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                        )}
+                      >
+                        {option}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="space-y-2">
+                  <span className="text-sm text-zinc-400">
+                    What does that look like for you?{' '}
+                    <span className="text-zinc-600">(optional)</span>
+                  </span>
+                  <textarea
+                    value={goalDetail}
+                    onChange={(e) => setGoalDetail(e.target.value)}
+                    rows={4}
+                    placeholder="e.g. I skip the gym every time work gets busy…"
+                    className="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-3 text-sm leading-relaxed outline-none placeholder:text-zinc-600 focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF]"
+                  />
+                  <p className="text-xs italic text-zinc-600">
+                    The more honest you are, the sharper your mentor gets.
+                  </p>
+                </div>
               </div>
             </div>
           )}
@@ -314,80 +405,108 @@ export default function OnboardingPage() {
                   Your rules
                 </h1>
                 <p className="mt-1 text-sm text-zinc-500">
-                  What are your non-negotiables? Rules you&apos;ve set for
-                  yourself.
+                  What are your non-negotiables?
                 </p>
               </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={ruleInput}
-                  onChange={(e) => setRuleInput(e.target.value)}
-                  onKeyDown={handleRuleKeyDown}
-                  placeholder="Type a rule and press Enter"
-                  className="flex-1 rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none placeholder:text-zinc-600 focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF]"
-                />
-                <button
-                  type="button"
-                  onClick={addRule}
-                  disabled={!ruleInput.trim()}
-                  className="shrink-0 rounded-lg bg-[#2E5BFF] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#2548d4] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Add
-                </button>
-              </div>
-              {nonNegotiables.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {nonNegotiables.map((rule) => (
-                    <span
-                      key={rule}
-                      className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-zinc-700/50 bg-[#1a1a2e] px-3 py-1.5 text-sm"
-                    >
-                      {rule}
-                      <button
-                        type="button"
-                        onClick={() => removeRule(rule)}
-                        aria-label={`Remove ${rule}`}
-                        className="text-zinc-500 hover:text-zinc-300"
+
+              {/* Section A — Added rules */}
+              <div className="min-h-[36px]">
+                {nonNegotiables.length === 0 ? (
+                  <p className="text-xs italic text-zinc-600">
+                    Your rules will appear here
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {nonNegotiables.map((rule) => (
+                      <span
+                        key={rule}
+                        className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[#2E5BFF]/60 bg-[#2E5BFF]/10 px-3 py-1 text-xs text-zinc-100"
                       >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div className="space-y-2">
-                <p className="text-xs text-zinc-500">Examples</p>
-                <ul className="space-y-1.5">
-                  {RULE_EXAMPLES.map((example) => (
-                    <li 
-                      key={example} 
-                      className="text-xs text-zinc-600 cursor-pointer hover:text-zinc-400 transition-colors"
-                      onClick={() => !nonNegotiables.includes(example) && setNonNegotiables(prev => [...prev, example])}
-                    >
-                      {example}
-                    </li>
-                  ))}
-                </ul>
+                        {rule}
+                        <button
+                          type="button"
+                          onClick={() => removeRule(rule)}
+                          aria-label={`Remove ${rule}`}
+                          className="text-zinc-400 hover:text-zinc-200 transition-colors"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div className="space-y-2 pt-2">
-                <p className="text-xs text-zinc-500">Finance</p>
-                <ul className="space-y-1.5">
-                  {[
-                    "No food delivery more than 3x/week",
-                    "Log every expense in the debrief daily",
-                    "No impulse purchase above ₹500",
-                    "Weekly spend under ₹3,000"
-                  ].map((example) => (
-                    <li 
-                      key={example} 
-                      className="text-xs text-zinc-600 cursor-pointer hover:text-zinc-400 transition-colors"
-                      onClick={() => !nonNegotiables.includes(example) && setNonNegotiables(prev => [...prev, example])}
+
+              {/* Section B — Suggestion chips by category */}
+              <div className="space-y-4">
+                {RULE_SUGGESTIONS.map(({ category, items }) => (
+                  <div key={category} className="space-y-2">
+                    <p
+                      className="text-[10px] font-medium uppercase tracking-[0.06em] text-zinc-500"
                     >
-                      {example}
-                    </li>
-                  ))}
-                </ul>
+                      {category}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {items.map((item) => {
+                        const added = nonNegotiables.includes(item)
+                        return (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() =>
+                              setNonNegotiables((prev) =>
+                                added
+                                  ? prev.filter((r) => r !== item)
+                                  : [...prev, item]
+                              )
+                            }
+                            className={cn(
+                              'rounded-full border px-[11px] py-[5px] text-xs font-medium transition-colors',
+                              added
+                                ? 'border-[#2E5BFF]/60 bg-[#2E5BFF]/10 text-zinc-100'
+                                : 'border-zinc-800 bg-[#1a1a1a] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                'mr-1 font-semibold',
+                                added ? 'text-[#2E5BFF]' : 'text-[#4A6FFF]'
+                              )}
+                            >
+                              {added ? '✓' : '+'}
+                            </span>
+                            {item}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Section C — Custom rule input */}
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={ruleInput}
+                    onChange={(e) => setRuleInput(e.target.value)}
+                    onKeyDown={handleRuleKeyDown}
+                    placeholder="Write your own rule…"
+                    className="flex-1 rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none placeholder:text-zinc-600 focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF]"
+                  />
+                  <button
+                    type="button"
+                    onClick={addRule}
+                    disabled={!ruleInput.trim()}
+                    className="shrink-0 rounded-lg bg-[#2E5BFF] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#2548d4] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Add
+                  </button>
+                </div>
+                <p className="text-xs italic text-zinc-600">
+                  You can always add more later.
+                </p>
               </div>
             </div>
           )}
@@ -399,16 +518,19 @@ export default function OnboardingPage() {
                   What should your mentor track?
                 </h1>
                 <p className="mt-1 text-sm text-zinc-500">
-                  Your mentor will ask about these every night in your debrief.
+                  Turn off anything you don&apos;t want asked about.
                 </p>
               </div>
               <div className="flex flex-col gap-3">
                 {/* Work & Priorities — locked on */}
-                <div className="flex items-start gap-4 rounded-xl border border-[#2E5BFF]/60 bg-[#2E5BFF]/10 px-4 py-3.5">
+                <div
+                  className="flex items-start gap-4 rounded-xl border px-4 py-3.5"
+                  style={{ borderColor: '#2a3a6a', background: '#141824' }}
+                >
                   <Briefcase className="mt-0.5 h-5 w-5 shrink-0 text-[#2E5BFF]" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-zinc-100">Work &amp; Priorities</p>
-                    <p className="text-xs text-zinc-500">Daily tasks, deep work, what got done</p>
+                    <p className="text-xs text-zinc-500">Tasks, deep work, what actually got done</p>
                   </div>
                   <span className="shrink-0 rounded-full bg-[#2E5BFF]/20 px-2 py-0.5 text-[10px] font-medium text-[#2E5BFF]">
                     Always on
@@ -424,17 +546,17 @@ export default function OnboardingPage() {
                         : [...prev, 'health']
                     )
                   }
-                  className={cn(
-                    'flex items-start gap-4 rounded-xl border px-4 py-3.5 text-left transition-colors',
+                  className="flex items-start gap-4 rounded-xl border px-4 py-3.5 text-left transition-colors"
+                  style={
                     trackedDomains.includes('health')
-                      ? 'border-[#2E5BFF]/60 bg-[#2E5BFF]/10'
-                      : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'
-                  )}
+                      ? { borderColor: '#2a3a6a', background: '#141824' }
+                      : { borderColor: '#222', background: '#161616' }
+                  }
                 >
                   <Heart className="mt-0.5 h-5 w-5 shrink-0 text-zinc-400" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-zinc-100">Health</p>
-                    <p className="text-xs text-zinc-500">Food, hydration, movement, sleep</p>
+                    <p className="text-xs text-zinc-500">Sleep, food, water, movement — the basics</p>
                   </div>
                   <span className={cn(
                     'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium',
@@ -455,17 +577,17 @@ export default function OnboardingPage() {
                         : [...prev, 'finance']
                     )
                   }
-                  className={cn(
-                    'flex items-start gap-4 rounded-xl border px-4 py-3.5 text-left transition-colors',
+                  className="flex items-start gap-4 rounded-xl border px-4 py-3.5 text-left transition-colors"
+                  style={
                     trackedDomains.includes('finance')
-                      ? 'border-[#2E5BFF]/60 bg-[#2E5BFF]/10'
-                      : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'
-                  )}
+                      ? { borderColor: '#2a3a6a', background: '#141824' }
+                      : { borderColor: '#222', background: '#161616' }
+                  }
                 >
                   <Wallet className="mt-0.5 h-5 w-5 shrink-0 text-zinc-400" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-zinc-100">Finance</p>
-                    <p className="text-xs text-zinc-500">Daily spending, violations, expense tracking</p>
+                    <p className="text-xs text-zinc-500">Spending, impulse buys, weekly budget</p>
                   </div>
                   <span className={cn(
                     'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium',
@@ -477,6 +599,9 @@ export default function OnboardingPage() {
                   </span>
                 </button>
               </div>
+              <p className="text-center text-xs italic text-zinc-600">
+                You can change these anytime in settings.
+              </p>
             </div>
           )}
 
@@ -487,7 +612,7 @@ export default function OnboardingPage() {
                   Mentor tone
                 </h1>
                 <p className="mt-1 text-sm text-zinc-500">
-                  How strict do you want your mentor to be?
+                  How should your mentor show up when you fall short?
                 </p>
               </div>
               <div className="space-y-4">
@@ -511,8 +636,44 @@ export default function OnboardingPage() {
                     Very strict
                   </span>
                 </div>
-                <p className="text-center text-2xl font-semibold text-[#2E5BFF]">
-                  {strictness}
+                <p
+                  className="text-center"
+                  style={{ fontSize: 13, color: '#4A6FFF', marginTop: 8 }}
+                >
+                  {STRICTNESS_LABELS[strictness]}
+                </p>
+              </div>
+              <div
+                style={{
+                  background: '#1a1f3a',
+                  border: '1px solid #2a3a6a',
+                  borderRadius: 10,
+                  padding: '12px 14px',
+                  marginBottom: 18,
+                }}
+              >
+                <p
+                  style={{
+                    fontSize: 10,
+                    color: '#4A6FFF',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    fontWeight: 500,
+                    marginBottom: 7,
+                  }}
+                >
+                  How your mentor sounds
+                </p>
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: '#8899cc',
+                    lineHeight: 1.6,
+                    fontStyle: 'italic',
+                    margin: 0,
+                  }}
+                >
+                  &ldquo;{STRICTNESS_PREVIEWS[strictness]}&rdquo;
                 </p>
               </div>
               <div className="space-y-3">
@@ -541,39 +702,108 @@ export default function OnboardingPage() {
           )}
 
           {step === 6 && (
-            <div className="space-y-6">
+            <div className="space-y-5">
               <div>
                 <h1 className="text-xl font-semibold tracking-tight">
                   Check-in times
                 </h1>
                 <p className="mt-1 text-sm text-zinc-500">
-                  When should your mentor check in with you each day?
+                  When do you usually wind down for the night?
                 </p>
               </div>
-              <label className="block space-y-2">
-                <span className="text-sm text-zinc-400">Morning check-in time</span>
-                <input
-                  type="time"
-                  value={morningTime}
-                  onChange={(e) => setMorningTime(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF] [color-scheme:dark]"
-                />
-                <p className="text-xs text-zinc-600">
-                  When should I check in with you at the start of your day?
-                </p>
-              </label>
-              <label className="block space-y-2">
-                <span className="text-sm text-zinc-400">Nightly debrief time</span>
-                <input
-                  type="time"
-                  value={reminderTime}
-                  onChange={(e) => setReminderTime(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF] [color-scheme:dark]"
-                />
-                <p className="text-xs text-zinc-600">
-                  When should your mentor check in for the nightly debrief?
-                </p>
-              </label>
+
+              {/* Section A — Nightly debrief */}
+              <div className="space-y-3">
+                <span className="text-xs font-medium uppercase tracking-[0.06em] text-zinc-500">
+                  Nightly debrief
+                </span>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+                  {DEBRIEF_TIME_OPTIONS.map((opt) => {
+                    const active = reminderTime === opt.value
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setReminderTime(opt.value)}
+                        style={{
+                          background: active ? '#1a1f3a' : '#1a1a1a',
+                          border: `1px solid ${active ? '#2a3a6a' : '#2a2a2a'}`,
+                          borderRadius: 8,
+                          padding: '9px 6px',
+                          textAlign: 'center',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <p style={{ fontSize: 13, color: active ? '#7fa0ff' : '#777', margin: 0 }}>
+                          {opt.label}
+                        </p>
+                        <p style={{ fontSize: 10, color: active ? '#4a6aaa' : '#555', marginTop: 2 }}>
+                          {opt.sub}
+                        </p>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span style={{ fontSize: 12, color: '#555' }}>Or set exact time</span>
+                  <input
+                    type="time"
+                    value={reminderTime}
+                    onChange={(e) => setReminderTime(e.target.value)}
+                    className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-sm outline-none focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF] [color-scheme:dark]"
+                    style={{ width: 120 }}
+                  />
+                </div>
+              </div>
+
+              <hr style={{ border: 'none', borderTop: '1px solid #1e1e1e', margin: '14px 0' }} />
+
+              {/* Section B — Morning check-in */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium uppercase tracking-[0.06em] text-zinc-500">
+                    Morning check-in
+                  </span>
+                  <span className="text-xs text-zinc-600">(optional)</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+                  {MORNING_TIME_OPTIONS.map((opt) => {
+                    const active =
+                      opt.value === 'off'
+                        ? !morningEnabled
+                        : morningEnabled && morningTime === opt.value
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => {
+                          if (opt.value === 'off') {
+                            setMorningEnabled(false)
+                          } else {
+                            setMorningTime(opt.value)
+                            setMorningEnabled(true)
+                          }
+                        }}
+                        style={{
+                          background: active ? '#1a1f3a' : '#1a1a1a',
+                          border: `1px solid ${active ? '#2a3a6a' : '#2a2a2a'}`,
+                          borderRadius: 8,
+                          padding: '9px 6px',
+                          textAlign: 'center',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <p style={{ fontSize: 13, color: active ? '#7fa0ff' : '#777', margin: 0 }}>
+                          {opt.label}
+                        </p>
+                        <p style={{ fontSize: 10, color: active ? '#4a6aaa' : '#555', marginTop: 2 }}>
+                          {opt.sub}
+                        </p>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </div>
