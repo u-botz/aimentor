@@ -107,6 +107,11 @@ function ChatPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [input, setInput] = useState('')
 
+  // Lazy opener — mentor's first line, shown before any DB session is created.
+  // Kept separate from messages[] so it isn't double-sent when the user replies.
+  const [openerText, setOpenerText] = useState<string | null>(null)
+  const [openerLoading, setOpenerLoading] = useState(false)
+
   // End session state
   const [sessionSaved, setSessionSaved] = useState(false)
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -123,12 +128,8 @@ function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  // Guards the proactive opener so the mentor greets exactly once per new session.
-  const kickedOffRef = useRef(false)
-  // Caps automatic kickoff retries. Without this, a failing opener resets
-  // kickedOffRef and the effect re-fires endlessly — the screen flickers as the
-  // greeting/typing indicator come and go on a loop.
-  const kickoffAttemptsRef = useRef(0)
+  // Prevents the opener from being fetched more than once per fresh session.
+  const openerFetchedRef = useRef(false)
 
   // ── Document title ───────────────────────────────────────────────────────────
 
@@ -147,7 +148,7 @@ function ChatPage() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages, isLoading, scrollToBottom])
+  }, [messages, isLoading, openerText, openerLoading, scrollToBottom])
 
   // ── Sessions list ───────────────────────────────────────────────────────────
 
@@ -246,10 +247,9 @@ function ChatPage() {
     setSessionSaved(false)
     setConfirmEnd(false)
     setSidebarOpen(false)
-    // Allow the next proactive session to open with a mentor greeting, with a
-    // fresh retry budget.
-    kickedOffRef.current = false
-    kickoffAttemptsRef.current = 0
+    // Clear the lazy opener so the next fresh session fetches a new one.
+    setOpenerText(null)
+    openerFetchedRef.current = false
   }, [])
 
   const handleSmartCTA = useCallback(() => {
@@ -281,77 +281,55 @@ function ChatPage() {
     }
   }, [])
 
-  // ── Proactive opener — mentor speaks first in morning/debrief sessions ────────
-  // Creates the session, then asks the API for an opening turn with no user
-  // message. The server injects a synthetic (unsaved, hidden) opener so Claude
-  // produces the first message.
+  // ── Session param — must be declared before any effect that reads it ────────
+  const sessionParam = searchParams.get('session')
+  const appliedSessionParamRef = useRef<string | null>(null)
 
-  const kickoffSession = useCallback(
-    async (currentMode: SessionMode) => {
-      setIsLoading(true)
-      try {
-        const newId = await ensureSession(currentMode)
-        if (!newId) throw new Error('Could not create session')
-        fetchSessions()
+  // ── Lazy opener — fetch the mentor's first line without creating a session ────
+  // POSTs to /api/opener which calls generateOpener() and returns { opener }.
+  // No session is created here; no messages are saved. A glance-and-close is
+  // completely free of DB side-effects. The opener is held in openerText state
+  // and merged into messages[] only when the user actually replies (handleSend).
 
-        const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: [], sessionId: newId, mode: currentMode }),
-        })
-        if (!res.ok || !res.body) {
-          throw new Error(`Kickoff request failed: ${res.status}`)
-        }
+  useEffect(() => {
+    if (sessionParam) return          // resuming a historical session — no opener
+    if (sessionId) return             // session already loaded
+    if (messages.length > 0) return   // already have real messages
+    if (openerFetchedRef.current) return
+    openerFetchedRef.current = true
 
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let assistantContent = ''
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          assistantContent += decoder.decode(value, { stream: true })
-          const content = assistantContent
-          setMessages((prev) => {
-            const last = prev[prev.length - 1]
-            if (last?.role === 'assistant') {
-              const updated = [...prev]
-              updated[updated.length - 1] = { role: 'assistant', content }
-              return updated
-            }
-            return [...prev, { role: 'assistant', content }]
-          })
-        }
+    let cancelled = false
+    setOpenerLoading(true)
 
-        fetchSessions()
-      } catch (err) {
-        console.error('Kickoff error:', err)
-        // Drop an empty assistant bubble.
-        setMessages((prev) =>
-          prev[prev.length - 1]?.role === 'assistant' &&
-          prev[prev.length - 1].content === ''
-            ? prev.slice(0, -1)
-            : prev
-        )
-        // Re-arm for a bounded number of retries only. A persistently failing
-        // opener (e.g. a 500 from session creation) would otherwise loop the
-        // kickoff effect forever and flicker the UI. After the cap we stop and
-        // leave the input enabled so the user can start the conversation.
-        kickoffAttemptsRef.current += 1
-        if (kickoffAttemptsRef.current < 3) {
-          kickedOffRef.current = false
-        }
-      } finally {
-        setIsLoading(false)
-      }
-    },
-    [ensureSession, fetchSessions]
-  )
+    fetch('/api/opener', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Opener fetch failed: ${res.status}`)
+        const { opener } = (await res.json()) as { opener: string }
+        if (!cancelled && opener?.trim()) setOpenerText(opener.trim())
+      })
+      .catch((err) => {
+        console.error('Opener fetch error (non-fatal):', err)
+        // Input stays enabled — user can start the conversation without an opener.
+      })
+      .finally(() => {
+        if (!cancelled) setOpenerLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [mode, sessionParam, sessionId, messages.length])
 
   // ── Load historical session ──────────────────────────────────────────────────
 
   const loadSession = useCallback(async (s: SessionSummary) => {
     if (s.id === sessionId) { setSidebarOpen(false); return }
     setLoadingSession(true)
+    // Clear any pending opener — we're resuming a real session, not opening fresh.
+    setOpenerText(null)
+    openerFetchedRef.current = true // suppress opener fetch for resumed sessions
     try {
       const res = await fetch(`/api/sessions/${s.id}/messages`)
       if (!res.ok) throw new Error('Failed to load messages')
@@ -370,8 +348,6 @@ function ChatPage() {
   }, [sessionId])
 
   // ── Open a session linked from another page (/chat?session=<id>) ──────────────
-  const sessionParam = searchParams.get('session')
-  const appliedSessionParamRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (
@@ -386,26 +362,6 @@ function ChatPage() {
       loadSession(summary)
     }
   }, [sessionParam, sessions, sessionId, loadSession])
-
-  // ── Trigger the proactive opener for a fresh morning/debrief session ──────────
-  useEffect(() => {
-    if (mode === 'open_chat') return // open chat stays user-led
-    if (sessionParam) return // opening a specific historical session
-    if (sessionId) return // session already exists (loaded or kicked off)
-    if (messages.length > 0) return
-    if (isLoading || loadingSession) return
-    if (kickedOffRef.current) return
-    kickedOffRef.current = true
-    kickoffSession(mode)
-  }, [
-    mode,
-    sessionParam,
-    sessionId,
-    messages.length,
-    isLoading,
-    loadingSession,
-    kickoffSession,
-  ])
 
   // ── End debrief session ──────────────────────────────────────────────────────
 
@@ -446,9 +402,23 @@ function ChatPage() {
     if (!trimmed || isLoading) return
 
     const userMessage: Message = { role: 'user', content: trimmed }
-    const nextMessages = [...messages, userMessage]
+
+    // ── First-send opener merge ───────────────────────────────────────────────
+    // If openerText is set, the user is replying to the lazy opener for the
+    // first time. We merge it as the leading assistant turn so:
+    //   1. The UI shows the full thread (opener → user reply → mentor response).
+    //   2. /api/chat receives real conversation context instead of an empty array
+    //      + the synthetic withLeadingUser nudge.
+    // Capture before clearing — once it moves into messages[] it must not fire again.
+    const currentOpener = openerText
+    const isNewSession = !sessionId
+
+    const nextMessages: Message[] = currentOpener
+      ? [{ role: 'assistant', content: currentOpener }, userMessage]
+      : [...messages, userMessage]
 
     setMessages(nextMessages)
+    if (currentOpener) setOpenerText(null) // opener is now in messages[]; clear UI state
     setInput('')
     setIsLoading(true)
 
@@ -457,13 +427,39 @@ function ChatPage() {
     }
 
     try {
-      // Create session on first message of a new conversation
+      // Create the DB session row on the very first user send.
+      // Nothing was written to the DB before this point — a glance-and-close
+      // leaves no sessions and no messages rows.
       let activeSessionId = sessionId
       if (!activeSessionId) {
         const newId = await ensureSession(mode)
         if (!newId) throw new Error('Could not create session')
         activeSessionId = newId
         fetchSessions()
+      }
+
+      // ── Persist the opener as the first DB row ────────────────────────────
+      // Save opener BEFORE calling /api/chat so the messages table order is:
+      //   assistant (opener) → user (reply) → assistant (new response)
+      // /api/chat saves the user message at the very start of the request, so
+      // we must await this call first to guarantee ordering.
+      // /api/messages/save is a thin endpoint (built separately); if it 404s or
+      // fails for any reason the chat still works — the opener just won't be in
+      // DB history for that session.
+      if (currentOpener) {
+        try {
+          await fetch('/api/messages/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId: activeSessionId,
+              role: 'assistant',
+              content: currentOpener,
+            }),
+          })
+        } catch (saveErr) {
+          console.warn('Opener DB save failed (non-fatal):', saveErr)
+        }
       }
 
       const res = await fetch('/api/chat', {
@@ -498,8 +494,10 @@ function ChatPage() {
         })
       }
 
-      // Refresh sidebar after first message so the new session appears with its title
-      if (nextMessages.length === 1) fetchSessions()
+      // Refresh sidebar once after the first real exchange so the session title
+      // appears. Use isNewSession (captured before ensureSession) — nextMessages
+      // length is unreliable here because it includes the opener when present.
+      if (isNewSession) fetchSessions()
     } catch (err) {
       console.error('Chat error:', err)
       setMessages((prev) => {
@@ -629,19 +627,15 @@ function ChatPage() {
         {/* Messages */}
         <main className="flex-1 overflow-y-auto px-4 py-6">
           <div className="mx-auto flex max-w-2xl flex-col gap-4">
-            {messages.length === 0 && !isLoading && !loadingSession && (
-              mode === 'morning' ? (
-                <div className="text-center pt-8">
-                  <p className="text-sm text-zinc-300">Good morning.</p>
-                  <p className="text-xs text-zinc-500 mt-1">Let&apos;s set the intention for today.</p>
+            {/* Lazy opener — shown as a real assistant bubble before any session
+                is created. Replaced by the same content inside messages[] on
+                the first user send, so it never appears twice. */}
+            {messages.length === 0 && openerText && (
+              <div className="flex justify-start">
+                <div className="max-w-[85%] rounded-2xl border border-zinc-700/40 bg-[#1a1a2e] px-4 py-2.5 text-sm leading-relaxed text-zinc-100">
+                  <MarkdownMessage content={openerText} />
                 </div>
-              ) : (
-                <p className="text-center text-sm text-zinc-500 pt-8">
-                  {mode === 'debrief'
-                    ? 'Ready for your nightly debrief. How did today go?'
-                    : "What's on your mind?"}
-                </p>
-              )
+              </div>
             )}
 
             {messages.map((msg, index) => (
@@ -665,7 +659,7 @@ function ChatPage() {
               </div>
             ))}
 
-            {(isLoading || loadingSession) &&
+            {(isLoading || loadingSession || openerLoading) &&
               (messages.length === 0 ||
                 messages[messages.length - 1]?.role === 'user') && (
                 <TypingIndicator />

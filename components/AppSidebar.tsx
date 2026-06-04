@@ -9,6 +9,7 @@ import {
   Moon,
   MessageCircle,
   LayoutDashboard,
+  Milestone,
   User,
   Trash2,
 } from 'lucide-react'
@@ -298,6 +299,19 @@ export function AppSidebar({
           >
             <LayoutDashboard className="h-4 w-4 shrink-0" />
             Dashboard
+          </Link>
+          <Link
+            href="/cards"
+            onClick={onClose}
+            className={cn(
+              'mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors',
+              pathname === '/cards'
+                ? 'bg-[#1a1a2e] text-zinc-100'
+                : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
+            )}
+          >
+            <Milestone className="h-4 w-4 shrink-0" />
+            Milestones
           </Link>
           <Link
             href="/profile"

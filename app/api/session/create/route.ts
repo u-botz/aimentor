@@ -26,6 +26,22 @@ async function closeAndExtractAbandonedSessions(userId: string) {
       .eq('id', session.id)
       .eq('user_id', userId)
 
+    // Skip extraction for opener-only or empty sessions — there is nothing
+    // meaningful to extract if the user never replied. A limit-1 query on
+    // role='user' is cheaper than fetching all messages and avoids running the
+    // LLM extractor (and writing a session_summary) for sessions that only
+    // contain the mentor's generated opener.
+    const { data: userMsg } = await supabaseAdmin
+      .from('messages')
+      .select('role')
+      .eq('session_id', session.id)
+      .eq('role', 'user')
+      .limit(1)
+      .maybeSingle()
+
+    if (!userMsg) continue
+
+    // Fetch all messages for extraction (only reached when >=1 user message exists).
     const { data: messages } = await supabaseAdmin
       .from('messages')
       .select('role, content')

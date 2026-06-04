@@ -1,7 +1,7 @@
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { streamChat, resolveModel } from '@/lib/model-router'
-import { assembleSystemPrompt, type SessionMode } from '@/lib/prompts/assemble'
+import { assembleSystemPrompt, type SessionMode, type SystemBlock } from '@/lib/prompts/assemble'
 import { fetchMemoryContext } from '@/lib/memory/fetch-context'
 import { rewriteMemory } from '@/lib/memory/rewrite'
 import { MORNING_PRIORITY_EXTRACT_PROMPT } from '@/lib/prompts/layer4-mode'
@@ -9,11 +9,12 @@ import { istDateString } from '@/lib/date'
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string }
 
-// The Anthropic API requires the first message to be from the user. When the
-// mentor opens the conversation proactively (notification → empty chat), the
-// stored transcript starts with an assistant turn, so we prepend a synthetic
-// user "opener" that cues the mentor to speak first. This opener is sent to the
-// model only — it is never saved to the DB and never shown in the UI.
+// The Anthropic API requires conversations to start with a user turn. In the
+// new opener-led flow the client sends [assistant(opener), user(reply), ...],
+// so messages[0] is always assistant. This function prepends a minimal synthetic
+// user cue so the API receives valid alternation — the real context comes from
+// the actual opener in messages[1]. It is a no-op when messages already starts
+// with a user turn (all turns after the first exchange).
 function withLeadingUser(messages: ChatMsg[], mode: SessionMode): ChatMsg[] {
   if (messages.length > 0 && messages[0].role === 'user') return messages
   const opener =
@@ -112,8 +113,9 @@ export async function POST(req: Request) {
     // 4. Fetch memory context (Layer 3)
     const memoryCtx = await fetchMemoryContext(userId)
 
-    // 5. Assemble system prompt (all 4 layers)
-    const systemPrompt = assembleSystemPrompt({
+    // 5. Assemble system prompt (all 4 layers) — returns SystemBlock[] with
+    //    cache_control markers so L1 + L2 are cached across turns.
+    const systemPrompt: SystemBlock[] = assembleSystemPrompt({
       user,
       memory: memoryCtx.memory,
       lastSession: memoryCtx.lastSession,
@@ -121,16 +123,57 @@ export async function POST(req: Request) {
       mode,
     })
 
-    // 6. Save user message to DB (skip when the mentor is opening — no real
-    //    user message exists yet for a proactive opener).
-    const lastMessage = messages[messages.length - 1]
-    if (lastMessage?.role === 'user') {
-      await supabaseAdmin.from('messages').insert({
-        session_id: sessionId,
-        user_id: userId,
-        role: 'user',
-        content: lastMessage.content,
-      })
+    // 6. Persist new message turns to the DB.
+    //
+    // New first-call shape: [assistant(opener), user(reply)]
+    // The opener may or may not already be in the DB (saved by /api/messages/save
+    // in the client before this request). We detect this by counting existing rows:
+    //
+    //   count === 0  →  nothing saved yet; insert opener then user in order.
+    //   count  > 0  →  opener already saved (or subsequent turn); insert only
+    //                   the trailing user message — existing behaviour.
+    //
+    // This is idempotent: if /api/messages/save saved the opener first (count=1)
+    // we skip re-inserting it and only append the user turn. If it failed
+    // (count=0) we save both here as a fallback, preserving correct DB order.
+    const { count: existingCount } = await supabaseAdmin
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('session_id', sessionId)
+
+    const isFirstCall =
+      (existingCount ?? 0) === 0 &&
+      messages.length >= 2 &&
+      messages[0].role === 'assistant'
+
+    if (isFirstCall) {
+      // Insert opener (assistant) then user reply in a single batch so the row
+      // timestamps preserve the intended order.
+      await supabaseAdmin.from('messages').insert([
+        {
+          session_id: sessionId,
+          user_id: userId,
+          role: 'assistant' as const,
+          content: messages[0].content,
+        },
+        {
+          session_id: sessionId,
+          user_id: userId,
+          role: 'user' as const,
+          content: messages[messages.length - 1].content,
+        },
+      ])
+    } else {
+      // Subsequent turns: save only the new trailing user message.
+      const lastMessage = messages[messages.length - 1]
+      if (lastMessage?.role === 'user') {
+        await supabaseAdmin.from('messages').insert({
+          session_id: sessionId,
+          user_id: userId,
+          role: 'user',
+          content: lastMessage.content,
+        })
+      }
     }
 
     // 6b. Every 3rd message, trigger memory rewrite in the background (fire-and-forget)
