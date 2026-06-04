@@ -128,8 +128,8 @@ function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  // Prevents the opener from being fetched more than once per fresh session.
-  const openerFetchedRef = useRef(false)
+  // Bumps on cleanup or new chat so stale opener fetches are ignored (incl. Strict Mode).
+  const openerRequestIdRef = useRef(0)
 
   // ── Document title ───────────────────────────────────────────────────────────
 
@@ -239,6 +239,26 @@ function ChatPage() {
 
   // ── Start a new blank chat (no DB session yet — created lazily on first send) ──
 
+  const loadOpener = useCallback(async (sessionMode: SessionMode) => {
+    const requestId = ++openerRequestIdRef.current
+    setOpenerLoading(true)
+    try {
+      const res = await fetch('/api/opener', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: sessionMode }),
+      })
+      if (!res.ok) throw new Error(`Opener fetch failed: ${res.status}`)
+      const { opener } = (await res.json()) as { opener: string }
+      if (requestId !== openerRequestIdRef.current) return
+      if (opener?.trim()) setOpenerText(opener.trim())
+    } catch (err) {
+      console.error('Opener fetch error (non-fatal):', err)
+    } finally {
+      if (requestId === openerRequestIdRef.current) setOpenerLoading(false)
+    }
+  }, [])
+
   const createNewSession = useCallback((newMode: SessionMode) => {
     setSessionId('')
     setMode(newMode)
@@ -247,10 +267,9 @@ function ChatPage() {
     setSessionSaved(false)
     setConfirmEnd(false)
     setSidebarOpen(false)
-    // Clear the lazy opener so the next fresh session fetches a new one.
     setOpenerText(null)
-    openerFetchedRef.current = false
-  }, [])
+    void loadOpener(newMode)
+  }, [loadOpener])
 
   const handleSmartCTA = useCallback(() => {
     if (hasDebriefedToday) {
@@ -287,49 +306,26 @@ function ChatPage() {
 
   // ── Lazy opener — fetch the mentor's first line without creating a session ────
   // POSTs to /api/opener which calls generateOpener() and returns { opener }.
-  // No session is created here; no messages are saved. A glance-and-close is
-  // completely free of DB side-effects. The opener is held in openerText state
-  // and merged into messages[] only when the user actually replies (handleSend).
+  // No session is created here; no messages are saved. The opener is held in
+  // openerText state and merged into messages[] only when the user replies.
 
   useEffect(() => {
-    if (sessionParam) return          // resuming a historical session — no opener
-    if (sessionId) return             // session already loaded
-    if (messages.length > 0) return   // already have real messages
-    if (openerFetchedRef.current) return
-    openerFetchedRef.current = true
-
-    let cancelled = false
-    setOpenerLoading(true)
-
-    fetch('/api/opener', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode }),
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`Opener fetch failed: ${res.status}`)
-        const { opener } = (await res.json()) as { opener: string }
-        if (!cancelled && opener?.trim()) setOpenerText(opener.trim())
-      })
-      .catch((err) => {
-        console.error('Opener fetch error (non-fatal):', err)
-        // Input stays enabled — user can start the conversation without an opener.
-      })
-      .finally(() => {
-        if (!cancelled) setOpenerLoading(false)
-      })
-
-    return () => { cancelled = true }
-  }, [mode, sessionParam, sessionId, messages.length])
+    if (sessionParam) return
+    if (sessionId) return
+    if (messages.length > 0) return
+    void loadOpener(mode)
+    return () => {
+      openerRequestIdRef.current++
+    }
+  }, [mode, sessionParam, sessionId, messages.length, loadOpener])
 
   // ── Load historical session ──────────────────────────────────────────────────
 
   const loadSession = useCallback(async (s: SessionSummary) => {
     if (s.id === sessionId) { setSidebarOpen(false); return }
     setLoadingSession(true)
-    // Clear any pending opener — we're resuming a real session, not opening fresh.
     setOpenerText(null)
-    openerFetchedRef.current = true // suppress opener fetch for resumed sessions
+    openerRequestIdRef.current++
     try {
       const res = await fetch(`/api/sessions/${s.id}/messages`)
       if (!res.ok) throw new Error('Failed to load messages')
