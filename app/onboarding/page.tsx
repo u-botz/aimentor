@@ -20,6 +20,15 @@ const GOAL_PLACEHOLDERS = [
   'Stop procrastinating on deep work',
 ]
 
+const ROLE_OPTIONS = [
+  'Student',
+  'Working',
+  'Freelancer',
+  'Founder',
+  'Job hunting',
+  'Other',
+] as const
+
 type CommunicationStyle = 'Direct' | 'Balanced' | 'Encouraging'
 
 const FEEDBACK_STYLES: CommunicationStyle[] = [
@@ -40,6 +49,7 @@ export default function OnboardingPage() {
   const [name, setName] = useState('')
   const [age, setAge] = useState('')
   const [role, setRole] = useState('')
+  const [roleDetail, setRoleDetail] = useState('')
   const [primaryGoal, setPrimaryGoal] = useState('')
   const [ruleInput, setRuleInput] = useState('')
   const [nonNegotiables, setNonNegotiables] = useState<string[]>([])
@@ -134,7 +144,7 @@ export default function OnboardingPage() {
         body: JSON.stringify({
           name: name.trim(),
           age: Number(age),
-          role: role.trim(),
+          role: roleDetail.trim() ? `${role} — ${roleDetail.trim()}` : role,
           primary_goal: primaryGoal.trim(),
           non_negotiables: nonNegotiables,
           tracked_domains: trackedDomains,
@@ -224,16 +234,43 @@ export default function OnboardingPage() {
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF]"
                 />
               </label>
-              <label className="block space-y-2">
-                <span className="text-sm text-zinc-400">Current role</span>
-                <input
-                  type="text"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  placeholder="e.g. Product Manager"
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none placeholder:text-zinc-600 focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF]"
-                />
-              </label>
+              <div className="space-y-3">
+                <span className="text-sm text-zinc-400">
+                  What best describes you right now?
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {ROLE_OPTIONS.map((option) => {
+                    const selected = role === option
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setRole(option)}
+                        className={cn(
+                          'rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
+                          selected
+                            ? 'border-[#2E5BFF]/60 bg-[#2E5BFF]/10 text-zinc-100'
+                            : 'border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                        )}
+                      >
+                        {option}
+                      </button>
+                    )
+                  })}
+                </div>
+                <label className="block space-y-2">
+                  <span className="text-sm text-zinc-400">
+                    Tell us more (optional)
+                  </span>
+                  <input
+                    type="text"
+                    value={roleDetail}
+                    onChange={(e) => setRoleDetail(e.target.value)}
+                    placeholder="e.g. Final year CS, building a startup, 2 years into my first job…"
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none placeholder:text-zinc-600 focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF]"
+                  />
+                </label>
+              </div>
             </div>
           )}
 

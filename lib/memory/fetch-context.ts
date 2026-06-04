@@ -1,9 +1,26 @@
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { istDateString } from '@/lib/date'
 import type {
   UserMemory,
   OpenCommitment,
   LastSession,
 } from '@/lib/prompts/layer3-memory'
+
+// Whole IST calendar days between two YYYY-MM-DD strings (UTC midnight math).
+function istDaysBetween(from: string, to: string): number {
+  const a = Date.parse(`${from}T00:00:00Z`)
+  const b = Date.parse(`${to}T00:00:00Z`)
+  if (Number.isNaN(a) || Number.isNaN(b)) return 0
+  return Math.max(0, Math.round((b - a) / 86_400_000))
+}
+
+function latestISTDate(...candidates: (string | null | undefined)[]): string | null {
+  const valid = candidates.filter(
+    (d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)
+  )
+  if (valid.length === 0) return null
+  return valid.sort().at(-1) ?? null
+}
 
 export async function fetchMemoryContext(userId: string): Promise<{
   memory: UserMemory
@@ -77,8 +94,24 @@ export async function fetchMemoryContext(userId: string): Promise<{
     lastDebriefCompleted = debriefLog?.completed ?? false
   }
 
+  const closedAtIST = lastClosed?.closed_at
+    ? istDateString(new Date(lastClosed.closed_at))
+    : null
+
+  const last_interaction_date = latestISTDate(
+    lastSummary?.summary_date,
+    lastDebrief?.debrief_date,
+    closedAtIST
+  )
+
+  const today = istDateString()
+  const days_since_last =
+    last_interaction_date !== null
+      ? istDaysBetween(last_interaction_date, today)
+      : null
+
   let lastSession: LastSession | null = null
-  if (lastSummary || lastDebrief) {
+  if (lastSummary || lastDebrief || lastClosed) {
     lastSession = {
       date: lastDebrief?.debrief_date ?? lastSummary?.summary_date ?? '',
       carry_forward: lastSummary?.summary ?? '',
@@ -86,6 +119,8 @@ export async function fetchMemoryContext(userId: string): Promise<{
       closed_at: lastClosed?.closed_at ?? null,
       mode: lastClosed?.mode ?? null,
       completed: lastDebriefCompleted,
+      last_interaction_date,
+      days_since_last,
     }
   }
 

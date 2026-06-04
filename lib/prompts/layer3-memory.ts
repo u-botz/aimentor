@@ -1,3 +1,5 @@
+import { istDateString } from '@/lib/date'
+
 export type UserMemory = {
   name: string
   identity_patterns: string[]
@@ -12,6 +14,8 @@ export type LastSession = {
   closed_at: string | null
   mode: string | null
   completed: boolean | null
+  last_interaction_date: string | null
+  days_since_last: number | null
 }
 
 export type OpenCommitment = {
@@ -19,6 +23,11 @@ export type OpenCommitment = {
   made_on: string
   due_date?: string | null
 }
+
+const ELAPSED_TIME_RULE =
+  'Use ONLY the DAYS SINCE LAST INTERACTION figure above when referring ' +
+  'to elapsed time. Do NOT estimate, calculate, or guess how long it has ' +
+  'been. If a figure is not provided, do not state a time gap at all.'
 
 export function buildMemoryLayer(
   memory: UserMemory,
@@ -42,9 +51,7 @@ Be warm. Establish your character early. Ask what's on their mind.
     ? memory.identity_strengths.map((s) => `- ${s}`).join('\n')
     : '- Still learning'
 
-  const todayIST = new Date().toLocaleDateString('en-CA', {
-    timeZone: 'Asia/Kolkata',
-  })
+  const todayIST = istDateString()
 
   const commitmentText = openCommitments.length
     ? openCommitments
@@ -62,14 +69,27 @@ Be warm. Establish your character early. Ask what's on their mind.
         .join('\n')
     : '- None open'
 
+  const daysSinceLabel =
+    lastSession?.days_since_last === null || lastSession?.days_since_last === undefined
+      ? 'first session'
+      : String(lastSession.days_since_last)
+
   const lastSessionText = lastSession
-    ? `DATE: ${new Date(lastSession.date).toDateString()}
+    ? `LAST INTERACTION: ${lastSession.last_interaction_date ?? 'unknown'} (YYYY-MM-DD)
+DAYS SINCE LAST INTERACTION: ${daysSinceLabel}
+TODAY: ${todayIST}
 NOTE: ${lastSession.carry_forward}
 PRIORITY SET: ${lastSession.tomorrow_priority ?? 'Not set'}
-LAST CLOSED: ${lastSession.closed_at ?? 'unknown'}
 SESSION MODE: ${lastSession.mode ?? 'unknown'}
-DEBRIEF COMPLETED: ${lastSession.completed === null ? 'n/a' : lastSession.completed ? 'yes' : 'no'}`
-    : 'No previous sessions yet'
+DEBRIEF COMPLETED: ${lastSession.completed === null ? 'n/a' : lastSession.completed ? 'yes' : 'no'}
+
+${ELAPSED_TIME_RULE}`
+    : `LAST INTERACTION: none (first session)
+DAYS SINCE LAST INTERACTION: first session
+TODAY: ${todayIST}
+(No prior session notes yet)
+
+${ELAPSED_TIME_RULE}`
 
   return `
 ## MEMORY CONTEXT
