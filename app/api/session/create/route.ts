@@ -1,3 +1,4 @@
+import { after } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { runSessionExtraction } from '@/app/api/session/extract/route'
@@ -61,7 +62,17 @@ export async function POST(req: Request) {
 
     const { mode } = await req.json() as { mode: 'open_chat' | 'debrief' | 'morning' }
 
-    await closeAndExtractAbandonedSessions(userId)
+    // Sweeping + extracting leftover abandoned sessions runs a full LLM call per
+    // session (no timeout). Doing it inline blocks the new session id from
+    // returning, which stalls the proactive opener — felt most in the morning,
+    // the first session opened after an overnight abandoned one. Defer it to
+    // after the response so creation returns immediately; extraction is
+    // idempotent so running it slightly later is safe.
+    after(() =>
+      closeAndExtractAbandonedSessions(userId).catch((err) =>
+        console.error('Abandoned session sweep failed:', err)
+      )
+    )
 
     const sessionData: {
       user_id: string

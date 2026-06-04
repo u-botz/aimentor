@@ -176,20 +176,21 @@ export async function POST(req: Request) {
           content: fullResponse,
         })
 
-        // Morning mode: silently capture today's plan. Never break the response.
-        // Skip on the proactive opener — there's no user input to extract yet.
-        if (mode === 'morning' && messages.length > 0) {
-          try {
-            await saveMorningPlan(userId, [
-              ...messages,
-              { role: 'assistant', content: fullResponse },
-            ])
-          } catch (err) {
-            console.error('Morning plan save failed:', err)
-          }
-        }
-
+        // Close the stream FIRST so the client's reader receives `done` and
+        // clears its loading state immediately. Anything heavier (a second LLM
+        // call) must run off this critical path — otherwise the typing
+        // indicator spins until that work finishes.
         controller.close()
+
+        // Morning mode: silently capture today's plan. Fire-and-forget so it
+        // never blocks the response. Skip on the proactive opener — there's no
+        // user input to extract yet.
+        if (mode === 'morning' && messages.length > 0) {
+          saveMorningPlan(userId, [
+            ...messages,
+            { role: 'assistant', content: fullResponse },
+          ]).catch((err) => console.error('Morning plan save failed:', err))
+        }
       },
     })
 
