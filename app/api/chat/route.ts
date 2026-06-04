@@ -93,10 +93,11 @@ export async function POST(req: Request) {
     }
 
     // 2. Parse request
-    const { messages, sessionId, mode = 'open_chat' } = await req.json() as {
+    const { messages, sessionId, mode = 'open_chat', isFirstSession = false } = await req.json() as {
       messages: { role: 'user' | 'assistant'; content: string }[]
       sessionId: string
       mode: SessionMode
+      isFirstSession?: boolean
     }
 
     // 3. Fetch user profile (Layer 2)
@@ -121,6 +122,7 @@ export async function POST(req: Request) {
       lastSession: memoryCtx.lastSession,
       openCommitments: memoryCtx.openCommitments,
       mode,
+      isFirstSession,
     })
 
     // 6. Persist new message turns to the DB.

@@ -117,7 +117,16 @@ export async function POST(req: Request) {
       return new Response('DB error', { status: 500 })
     }
 
-    return Response.json({ sessionId: data.id })
+    // Count total sessions for this user (including the one just created) to
+    // detect the very first session. count === 1 means this is their first ever.
+    const { count } = await supabaseAdmin
+      .from('sessions')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+
+    const isFirstSession = (count ?? 0) <= 1
+
+    return Response.json({ sessionId: data.id, isFirstSession })
   } catch (error) {
     console.error('Session error:', error)
     return new Response('Internal server error', { status: 500 })

@@ -106,6 +106,7 @@ function ChatPage() {
   })
   const [isLoading, setIsLoading] = useState(false)
   const [input, setInput] = useState('')
+  const [isFirstSession, setIsFirstSession] = useState(false)
 
   // Lazy opener — mentor's first line, shown before any DB session is created.
   // Kept separate from messages[] so it isn't double-sent when the user replies.
@@ -283,7 +284,7 @@ function ChatPage() {
 
   // ── Actually create the DB session row (called once per conversation) ─────────
 
-  const ensureSession = useCallback(async (currentMode: SessionMode): Promise<string | null> => {
+  const ensureSession = useCallback(async (currentMode: SessionMode): Promise<{ id: string; isFirst: boolean } | null> => {
     try {
       const res = await fetch('/api/session/create', {
         method: 'POST',
@@ -291,9 +292,10 @@ function ChatPage() {
         body: JSON.stringify({ mode: currentMode }),
       })
       if (!res.ok) throw new Error('Session creation failed')
-      const { sessionId: id } = (await res.json()) as { sessionId: string }
+      const { sessionId: id, isFirstSession: isFirst = false } = (await res.json()) as { sessionId: string; isFirstSession?: boolean }
       setSessionId(id)
-      return id
+      setIsFirstSession(isFirst)
+      return { id, isFirst }
     } catch (err) {
       console.error('Session creation error:', err)
       return null
@@ -427,10 +429,12 @@ function ChatPage() {
       // Nothing was written to the DB before this point — a glance-and-close
       // leaves no sessions and no messages rows.
       let activeSessionId = sessionId
+      let firstSession = false
       if (!activeSessionId) {
-        const newId = await ensureSession(mode)
-        if (!newId) throw new Error('Could not create session')
-        activeSessionId = newId
+        const created = await ensureSession(mode)
+        if (!created) throw new Error('Could not create session')
+        activeSessionId = created.id
+        firstSession = created.isFirst
         fetchSessions()
       }
 
@@ -461,7 +465,7 @@ function ChatPage() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: nextMessages, sessionId: activeSessionId, mode }),
+        body: JSON.stringify({ messages: nextMessages, sessionId: activeSessionId, mode, isFirstSession: firstSession }),
       })
 
       if (!res.ok || !res.body) {
