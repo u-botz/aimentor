@@ -63,11 +63,13 @@ export async function POST(req: Request) {
     const { mode } = await req.json() as { mode: 'open_chat' | 'debrief' | 'morning' }
 
     // Sweeping + extracting leftover abandoned sessions runs a full LLM call per
-    // session (no timeout). Doing it inline blocks the new session id from
-    // returning, which stalls the proactive opener — felt most in the morning,
-    // the first session opened after an overnight abandoned one. Defer it to
-    // after the response so creation returns immediately; extraction is
-    // idempotent so running it slightly later is safe.
+    // session (no timeout). Awaiting it inline blocks the new session id from
+    // returning and, on serverless, can blow the function's execution limit so
+    // session creation fails outright — which stalls/loops the proactive opener
+    // (felt most in the morning, the first session after an overnight abandoned
+    // one). `after()` runs it once the response is sent (kept alive via
+    // waitUntil on serverless), so creation returns immediately while extraction
+    // still completes. Extraction is idempotent, so running it later is safe.
     after(() =>
       closeAndExtractAbandonedSessions(userId).catch((err) =>
         console.error('Abandoned session sweep failed:', err)

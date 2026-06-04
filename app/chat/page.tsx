@@ -125,6 +125,10 @@ function ChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   // Guards the proactive opener so the mentor greets exactly once per new session.
   const kickedOffRef = useRef(false)
+  // Caps automatic kickoff retries. Without this, a failing opener resets
+  // kickedOffRef and the effect re-fires endlessly — the screen flickers as the
+  // greeting/typing indicator come and go on a loop.
+  const kickoffAttemptsRef = useRef(0)
 
   // ── Document title ───────────────────────────────────────────────────────────
 
@@ -242,8 +246,10 @@ function ChatPage() {
     setSessionSaved(false)
     setConfirmEnd(false)
     setSidebarOpen(false)
-    // Allow the next proactive session to open with a mentor greeting.
+    // Allow the next proactive session to open with a mentor greeting, with a
+    // fresh retry budget.
     kickedOffRef.current = false
+    kickoffAttemptsRef.current = 0
   }, [])
 
   const handleSmartCTA = useCallback(() => {
@@ -319,14 +325,21 @@ function ChatPage() {
         fetchSessions()
       } catch (err) {
         console.error('Kickoff error:', err)
-        // Drop an empty assistant bubble and allow a retry.
+        // Drop an empty assistant bubble.
         setMessages((prev) =>
           prev[prev.length - 1]?.role === 'assistant' &&
           prev[prev.length - 1].content === ''
             ? prev.slice(0, -1)
             : prev
         )
-        kickedOffRef.current = false
+        // Re-arm for a bounded number of retries only. A persistently failing
+        // opener (e.g. a 500 from session creation) would otherwise loop the
+        // kickoff effect forever and flicker the UI. After the cap we stop and
+        // leave the input enabled so the user can start the conversation.
+        kickoffAttemptsRef.current += 1
+        if (kickoffAttemptsRef.current < 3) {
+          kickedOffRef.current = false
+        }
       } finally {
         setIsLoading(false)
       }

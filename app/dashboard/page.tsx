@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
-import { Sunrise, MessageCircle, Moon, Flame, Wallet, User } from 'lucide-react'
+import { MessageCircle, Moon, Flame, Wallet, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AppShell } from '@/components/AppShell'
 import { NotificationOptIn } from '@/components/NotificationOptIn'
@@ -118,11 +118,9 @@ export default function DashboardPage() {
   const resolvedPriority = todaysPlan?.top_priority || todaysPriority || ''
 
   const momentLine =
-    period === 'morning'
-      ? "Set today's intention"
-      : period === 'evening'
-        ? "Tonight's the debrief"
-        : resolvedPriority || 'No priority set yet'
+    period === 'evening'
+      ? "Tonight's the debrief"
+      : resolvedPriority || 'No priority set yet'
 
   // ── Context line ───────────────────────────────────────────────────────────
   const contextLine =
@@ -136,9 +134,9 @@ export default function DashboardPage() {
   const primary =
     period === 'morning'
       ? {
-          label: "Set today's intention",
-          Icon: Sunrise,
-          onClick: () => router.push('/chat?mode=morning'),
+          label: 'Chat with your mentor',
+          Icon: MessageCircle,
+          onClick: () => router.push('/chat'),
         }
       : period === 'evening'
         ? {
@@ -156,9 +154,7 @@ export default function DashboardPage() {
   const priorityCardText =
     todaysPlan?.top_priority ||
     todaysPriority ||
-    (period === 'morning'
-      ? 'Not set yet — start your morning'
-      : "Complete tonight's debrief to set one")
+    "Complete tonight's debrief to set one"
 
   return (
     <AppShell>
