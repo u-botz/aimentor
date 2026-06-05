@@ -1,7 +1,10 @@
-import { streamChat, resolveModel } from '@/lib/model-router'
+import Anthropic from '@anthropic-ai/sdk'
+import { resolveModel } from '@/lib/model-router'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { istDateString } from '@/lib/date'
 import type { BuilderExtract } from './builder-types'
+
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 const BUILDER_SYSTEM_PROMPT =
   'You are a silent observer building a deep model of a person from their conversation with their mentor.\n' +
@@ -55,22 +58,17 @@ export async function runBuilderSweep(
       .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
       .join('\n')
 
-    const stream = await streamChat(
-      BUILDER_SYSTEM_PROMPT,
-      [{ role: 'user', content: conversationText }],
-      resolveModel('fast'),
-      1024
-    )
+    const response = await anthropic.messages.create({
+      model: resolveModel('fast'),
+      max_tokens: 1024,
+      system: BUILDER_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: conversationText }],
+    })
 
-    let rawText = ''
-    for await (const chunk of stream) {
-      if (
-        chunk.type === 'content_block_delta' &&
-        chunk.delta.type === 'text_delta'
-      ) {
-        rawText += chunk.delta.text
-      }
-    }
+    const rawText = response.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('')
 
     // Strip markdown fences the model occasionally emits despite instructions.
     const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim()
