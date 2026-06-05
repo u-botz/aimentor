@@ -7,10 +7,14 @@ const BUILDER_SYSTEM_PROMPT =
   'Your job is to extract what is genuinely worth remembering — not everything, but not nothing.\n\n' +
   'WHAT TO CAPTURE:\n' +
   'Facts (user_facts) — timeless things that are simply true about this person:\n' +
-  '  formative: childhood, loss, family, identity-shaping experiences. No event_date — these are bedrock.\n' +
+  '  formative: childhood, loss, family, identity-shaping experiences that made them who they are.\n' +
+  '             NOT for recent events, work history, or relationships formed as an adult.\n' +
+  '             If you are unsure, it is probably not formative — use pattern or red_flag instead.\n' +
   '  pattern:   recurring behaviors, tendencies, how they respond under pressure, what they avoid.\n' +
   '  strength:  demonstrated capabilities, what they are good at, what they push through.\n' +
-  '  red_flag:  concerning tendencies — avoidance, self-sabotage, repeated failures, unhealthy patterns.\n\n' +
+  '  red_flag:  concerning tendencies — avoidance, self-sabotage, repeated failures, unhealthy patterns.\n' +
+  '             Example: tension avoided for months until it explodes = red_flag, not formative.\n' +
+  '             Example: questions partnership after one argument = red_flag worth watching.\n\n' +
   'Facts are especially important when:\n' +
   '  - A pattern is revealed across time ("we have had this tension for months")\n' +
   '  - The person names a recurring behavior in themselves or their relationships\n' +
