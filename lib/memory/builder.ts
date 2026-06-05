@@ -70,6 +70,8 @@ export async function runBuilderSweep(
       .map((b) => b.text)
       .join('')
 
+    console.log('[builder] raw response:', rawText)
+
     // Strip markdown fences the model occasionally emits despite instructions.
     const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim()
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
