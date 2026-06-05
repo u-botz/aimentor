@@ -4,24 +4,36 @@ import { istDateString } from '@/lib/date'
 import type { BuilderExtract } from './builder-types'
 
 const BUILDER_SYSTEM_PROMPT =
-  'You are a silent observer building a model of a person from their\n' +
-  'conversation with their mentor. You never speak to them.\n' +
-  'Extract ONLY what is genuinely notable. Most turns yield nothing — that is\n' +
-  'correct. Do not invent. Care first: never extract anything that would feel\n' +
-  'like surveillance if the person read it.\n\n' +
-  'Return JSON:\n' +
+  'You are a silent observer building a deep model of a person from their conversation with their mentor.\n' +
+  'Your job is to extract what is genuinely worth remembering — not everything, but not nothing.\n\n' +
+  'WHAT TO CAPTURE:\n' +
+  'Facts (user_facts) — timeless things that are simply true about this person:\n' +
+  '  formative: childhood, loss, family, identity-shaping experiences. No event_date — these are bedrock.\n' +
+  '  pattern:   recurring behaviors, tendencies, how they respond under pressure, what they avoid.\n' +
+  '  strength:  demonstrated capabilities, what they are good at, what they push through.\n' +
+  '  red_flag:  concerning tendencies — avoidance, self-sabotage, repeated failures, unhealthy patterns.\n\n' +
+  'Events (user_events) — things that happened on the timeline, with an arc:\n' +
+  '  Capture: conflicts, setbacks, wins, decisions, significant conversations, milestones.\n' +
+  '  event_date: use today\'s date (YYYY-MM-DD) for things happening now. Null only for undated past events.\n' +
+  '  avoidable: true if better preparation or behavior could have prevented it. false for external events.\n' +
+  '  domain: work | health | finance | personal — pick the primary one.\n' +
+  '  arc: how it unfolded, what they did, how they are carrying it. Not a label — a case study.\n\n' +
+  'WEIGHT RULES — be discriminating:\n' +
+  '  high: life-changing, identity-level, or highly recurring. Use sparingly.\n' +
+  '  medium: notable and worth remembering. Default for most captures.\n' +
+  '  low: minor pattern or small event. Use when it is worth noting but not significant.\n\n' +
+  'WHAT NOT TO CAPTURE:\n' +
+  '  - Small talk, greetings, procedural exchanges ("hey", "thanks", "got it")\n' +
+  '  - Things the user already told the mentor explicitly (onboarding data)\n' +
+  '  - Anything that would feel invasive or clinical if the person read it back\n\n' +
+  'Today\'s date for event_date reference: ' + new Date().toISOString().split('T')[0] + '\n\n' +
+  'Return ONLY valid JSON. No preamble. No markdown. No explanation.\n' +
   '{\n' +
-  '  "facts": [ { "fact": string, "category": "formative"|"pattern"|"strength"|"red_flag",\n' +
-  '               "weight": "high"|"medium"|"low" } ],\n' +
-  '  "events": [ { "what_happened": string, "arc": string|null,\n' +
-  '                "event_date": "YYYY-MM-DD"|null, "avoidable": boolean|null,\n' +
-  '                "domain": "work"|"health"|"finance"|"personal"|null,\n' +
-  '                "weight": "high"|"medium"|"low" } ],\n' +
+  '  "facts": [ { "fact": string, "category": "formative"|"pattern"|"strength"|"red_flag", "weight": "high"|"medium"|"low" } ],\n' +
+  '  "events": [ { "what_happened": string, "arc": string|null, "event_date": "YYYY-MM-DD"|null, "avoidable": boolean|null, "domain": "work"|"health"|"finance"|"personal"|null, "weight": "high"|"medium"|"low" } ],\n' +
   '  "commitments_made": [ string ],\n' +
   '  "commitments_resolved": [ string ]\n' +
-  '}\n' +
-  'Empty arrays when nothing notable. Formative facts (childhood, loss, identity)\n' +
-  'get event_date null. Dated events get a real date or null if unknown.'
+  '}'
 
 export type BuilderSweepResult =
   | { skipped: true; reason: string }
