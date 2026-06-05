@@ -11,6 +11,13 @@ const BUILDER_SYSTEM_PROMPT =
   '  pattern:   recurring behaviors, tendencies, how they respond under pressure, what they avoid.\n' +
   '  strength:  demonstrated capabilities, what they are good at, what they push through.\n' +
   '  red_flag:  concerning tendencies — avoidance, self-sabotage, repeated failures, unhealthy patterns.\n\n' +
+  'Facts are especially important when:\n' +
+  '  - A pattern is revealed across time ("we have had this tension for months")\n' +
+  '  - The person names a recurring behavior in themselves or their relationships\n' +
+  '  - A strength is demonstrated under pressure\n' +
+  '  - A red flag appears — avoidance, explosion after buildup, deflection\n' +
+  'When in doubt between fact and event: if it is recurring or timeless, it is a fact.\n' +
+  'If it happened once with a date, it is an event.\n\n' +
   'Events (user_events) — things that happened on the timeline, with an arc:\n' +
   '  Capture: conflicts, setbacks, wins, decisions, significant conversations, milestones.\n' +
   '  event_date: use today\'s date (YYYY-MM-DD) for things happening now. Null only for undated past events.\n' +
@@ -125,25 +132,38 @@ export async function runBuilderSweep(
     }
 
     // ── Write 2: events → user_events ──────────────────────────────────────────
+    // Dedup: skip events whose domain was already captured in the last 24 hours
+    // to prevent the same incident being written on every consecutive turn.
     if (events.length > 0) {
-      try {
-        const { error } = await supabaseAdmin.from('user_events').insert(
-          events.map((e) => ({
-            user_id: userId,
-            event_date: e.event_date ?? null,
-            what_happened: e.what_happened,
-            arc: e.arc ?? null,
-            avoidable: e.avoidable ?? null,
-            domain: e.domain ?? null,
-            weight: e.weight,
-            session_id: sessionId,
-          }))
-        )
-        if (error) {
-          console.error('[builder] user_events insert failed for session', sessionId, ':', error)
+      const { data: recentEvents } = await supabaseAdmin
+        .from('user_events')
+        .select('domain, what_happened')
+        .eq('user_id', userId)
+        .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+
+      const recentDomains = new Set((recentEvents ?? []).map((e) => e.domain))
+      const newEvents = events.filter((e) => !recentDomains.has(e.domain))
+
+      if (newEvents.length > 0) {
+        try {
+          const { error } = await supabaseAdmin.from('user_events').insert(
+            newEvents.map((e) => ({
+              user_id: userId,
+              event_date: e.event_date ?? null,
+              what_happened: e.what_happened,
+              arc: e.arc ?? null,
+              avoidable: e.avoidable ?? null,
+              domain: e.domain ?? null,
+              weight: e.weight,
+              session_id: sessionId,
+            }))
+          )
+          if (error) {
+            console.error('[builder] user_events insert failed for session', sessionId, ':', error)
+          }
+        } catch (err) {
+          console.error('[builder] user_events insert threw for session', sessionId, ':', err)
         }
-      } catch (err) {
-        console.error('[builder] user_events insert threw for session', sessionId, ':', err)
       }
     }
 
