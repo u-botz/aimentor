@@ -6,6 +6,7 @@ import { fetchMemoryContext } from '@/lib/memory/fetch-context'
 import { rewriteMemory } from '@/lib/memory/rewrite'
 import { MORNING_PRIORITY_EXTRACT_PROMPT } from '@/lib/prompts/layer4-mode'
 import { istDateString } from '@/lib/date'
+import { runBuilderSweep } from '@/lib/memory/builder'
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string }
 
@@ -236,6 +237,15 @@ export async function POST(req: Request) {
             { role: 'assistant', content: fullResponse },
           ]).catch((err) => console.error('Morning plan save failed:', err))
         }
+
+        // Builder live check: silently append facts/events/commitments from
+        // this turn. Append-only — never updates user_profile (race guard).
+        runBuilderSweep(
+          userId,
+          sessionId,
+          [...messages, { role: 'assistant', content: fullResponse }],
+          { live: true }
+        ).catch((err) => console.error('[builder live]', err))
       },
     })
 
