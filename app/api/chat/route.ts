@@ -228,19 +228,16 @@ export async function POST(req: Request) {
         // indicator spins until that work finishes.
         controller.close()
 
-        // Morning mode: silently capture today's plan. Fire-and-forget so it
-        // never blocks the response. Skip on the proactive opener — there's no
-        // user input to extract yet.
+        // Fire-and-forget: explicitly void so TS/runtime does not
+        // implicitly await these and hold the function open.
         if (mode === 'morning' && messages.length > 0) {
-          saveMorningPlan(userId, [
+          void saveMorningPlan(userId, [
             ...messages,
             { role: 'assistant', content: fullResponse },
           ]).catch((err) => console.error('Morning plan save failed:', err))
         }
 
-        // Builder live check: silently append facts/events/commitments from
-        // this turn. Append-only — never updates user_profile (race guard).
-        runBuilderSweep(
+        void runBuilderSweep(
           userId,
           sessionId,
           [...messages, { role: 'assistant', content: fullResponse }],
