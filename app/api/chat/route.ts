@@ -115,9 +115,12 @@ export async function POST(req: Request) {
     // 4. Fetch memory context (Layer 3)
     const memoryCtx = await fetchMemoryContext(userId)
 
-    // 5. Assemble system prompt (all 4 layers) — returns SystemBlock[] with
-    //    cache_control markers so L1 + L2 are cached across turns.
-    const systemPrompt: SystemBlock[] = assembleSystemPrompt({
+    // 5. Assemble system prompt (all 4 layers) — now async because it fetches
+    //    the rich time context before building the block.  cache_control markers
+    //    on L1 + L2 blocks still apply across turns.
+    const systemPrompt: SystemBlock[] = await assembleSystemPrompt({
+      userId,
+      reminderTime: (user.reminder_time as string | null) ?? null,
       user,
       memory: memoryCtx.memory,
       lastSession: memoryCtx.lastSession,

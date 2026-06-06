@@ -7,10 +7,13 @@ import {
   type LastSession,
 } from './layer3-memory'
 import { OPEN_CHAT_PROMPT, buildDebriefPrompt, MORNING_MODE_PROMPT, FIRST_SESSION_PROMPT } from './layer4-mode'
+import { buildTimeContext, formatTimeContextForPrompt } from '@/lib/time-context'
 
 export type SessionMode = 'open_chat' | 'debrief' | 'morning'
 
 export type PromptContext = {
+  userId: string
+  reminderTime: string | null
   user: UserProfile
   memory: UserMemory
   lastSession: LastSession | null
@@ -28,18 +31,13 @@ export type SystemBlock = {
   cache_control?: { type: 'ephemeral' }
 }
 
-export function assembleSystemPrompt(ctx: PromptContext): SystemBlock[] {
-  const now = new Date().toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  })
-  const timeContext = `CURRENT TIME: ${now} IST`
+export async function assembleSystemPrompt(ctx: PromptContext): Promise<SystemBlock[]> {
+  // ── Rich time context (replaces single-line timestamp) ────────────────────
+  // Fetched fresh every call so the mentor always sees the correct temporal
+  // state.  Runs in parallel with the rest of assembly; no cache_control here
+  // because this block changes minute-by-minute.
+  const timeContext = await buildTimeContext(ctx.userId, ctx.reminderTime)
+  const timeBlock   = formatTimeContextForPrompt(timeContext)
 
   const layer1 = BASE_MENTOR_PROMPT
   const layer2 = buildUserLayer(ctx.user)
@@ -56,8 +54,8 @@ export function assembleSystemPrompt(ctx: PromptContext): SystemBlock[] {
   return [
     // ── Block 1: L1 character ─────────────────────────────────────────────────
     // Identical for every user and every session — the deepest cache boundary.
-    // Marking it means the ~650-token character definition is never re-processed
-    // after the first call that warms the cache.
+    // Marking it means the character definition is never re-processed after the
+    // first call that warms the cache.
     {
       type: 'text',
       text: layer1,
@@ -66,21 +64,22 @@ export function assembleSystemPrompt(ctx: PromptContext): SystemBlock[] {
 
     // ── Block 2: L2 user profile ──────────────────────────────────────────────
     // User-specific but only changes when the user edits their profile (rare).
-    // Caching here gives a per-user hit on every turn of every session until the
-    // profile changes. Together with Block 1 this covers ~850 stable tokens.
+    // Caching here gives a per-user hit on every turn of every session until
+    // the profile changes.  Together with Block 1 this covers stable tokens.
     {
       type: 'text',
       text: layer2,
       cache_control: { type: 'ephemeral' },
     },
 
-    // ── Block 3: L3 memory + L4 mode + current time ───────────────────────────
-    // Memory refreshes every ~3 days; mode changes per session; time changes
-    // every minute. Putting volatile content LAST means it can never break the
-    // stable prefix cache. No cache_control — let Blocks 1+2 carry the savings.
+    // ── Block 3: time block + L3 memory + L4 mode ─────────────────────────────
+    // Time block is first so the mentor reads the temporal situation before
+    // it reads history.  Memory refreshes every ~3 days; mode changes per
+    // session; time changes every minute.  No cache_control — Blocks 1+2 carry
+    // the savings; volatile content here never breaks that stable prefix.
     {
       type: 'text',
-      text: [layer3, layer4, timeContext].join('\n\n---\n\n'),
+      text: [timeBlock, layer3, layer4].join('\n\n---\n\n'),
     },
   ]
 }
