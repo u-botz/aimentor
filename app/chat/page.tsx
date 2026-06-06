@@ -61,6 +61,36 @@ const MODE_BADGE_STYLE: Record<SessionMode, string> = {
   morning:   'bg-[#10B981]/20 text-[#10B981]',
 }
 
+// ─── localStorage helpers ─────────────────────────────────────────────────────
+
+const LS_SESSION_KEY = 'ai_mentor_active_session'
+const lsDraftKey = (sid: string) => `ai_mentor_draft_${sid}`
+
+function lsSaveSession(id: string, mode: SessionMode) {
+  try { localStorage.setItem(LS_SESSION_KEY, JSON.stringify({ id, mode })) } catch {}
+}
+function lsClearSession() {
+  try { localStorage.removeItem(LS_SESSION_KEY) } catch {}
+}
+function lsGetSession(): { id: string; mode: SessionMode } | null {
+  try {
+    const raw = localStorage.getItem(LS_SESSION_KEY)
+    if (!raw) return null
+    return JSON.parse(raw) as { id: string; mode: SessionMode }
+  } catch { return null }
+}
+function lsSaveDraft(sid: string, text: string) {
+  try { localStorage.setItem(lsDraftKey(sid), text) } catch {}
+}
+function lsGetDraft(sid: string): string {
+  try { return localStorage.getItem(lsDraftKey(sid)) ?? '' } catch { return '' }
+}
+function lsClearDraft(sid: string) {
+  try { localStorage.removeItem(lsDraftKey(sid)) } catch {}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const LINE_HEIGHT_PX = 24
 const MAX_TEXTAREA_LINES = 4
 
@@ -159,12 +189,12 @@ function SessionPicker({
   ]
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end">
+    <div className="fixed inset-0 z-[60] flex items-end">
       {/* Backdrop */}
       <div className="absolute inset-0 sheet-backdrop" />
 
       {/* Sheet */}
-      <div className="animate-slide-up relative w-full rounded-t-3xl bg-[#141414] px-5 pt-3 pb-8">
+      <div className="animate-slide-up relative w-full rounded-t-3xl bg-[#141414] px-5 pt-3" style={{ paddingBottom: 'calc(24px + env(safe-area-inset-bottom))' }}>
         {/* Handle */}
         <div className="mx-auto mb-5 h-1 w-8 rounded-full bg-[#2A2A2A]" />
         <h2 className="mb-4 text-[16px] font-bold text-[#F5F5F5]">Start a session</h2>
@@ -233,7 +263,7 @@ function HistorySheet({
     mode === 'debrief' ? '🌙' : mode === 'morning' ? '☀️' : '💬'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end">
+    <div className="fixed inset-0 z-[60] flex items-end">
       <div className="absolute inset-0 sheet-backdrop" onClick={onClose} />
       <div className="animate-slide-up relative w-full max-h-[75vh] rounded-t-3xl bg-[#141414] flex flex-col">
         {/* Handle + header */}
@@ -252,7 +282,7 @@ function HistorySheet({
         </div>
 
         {/* Session list */}
-        <div className="flex-1 overflow-y-auto px-5 pb-8">
+        <div className="flex-1 overflow-y-auto px-5" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
           {groups.length === 0 ? (
             <p className="py-8 text-center text-[14px] text-[#6B7280]">
               No past sessions yet.
@@ -343,10 +373,8 @@ function ChatPage() {
   const [showPicker, setShowPicker] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
 
-  // Show picker when no session param and no explicit mode
   const sessionParam = searchParams.get('session')
   const modeParam = searchParams.get('mode')
-  const [pickerDismissed, setPickerDismissed] = useState(!!modeParam || !!sessionParam)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -364,13 +392,6 @@ function ChatPage() {
   useEffect(() => {
     scrollToBottom()
   }, [messages, isLoading, openerText, openerLoading, scrollToBottom])
-
-  // Show picker on mount if no session/mode specified
-  useEffect(() => {
-    if (!pickerDismissed && !sessionParam && !modeParam) {
-      setShowPicker(true)
-    }
-  }, [pickerDismissed, sessionParam, modeParam])
 
   // Fetch sessions list
   const fetchSessions = useCallback(async () => {
@@ -407,7 +428,7 @@ function ChatPage() {
     return () => clearTimeout(timer)
   }, [reminderTime])
 
-  // Init
+  // Init — sync user, check onboarding, then decide: restore session / load opener / show picker
   useEffect(() => {
     let cancelled = false
     async function initialize() {
@@ -422,13 +443,31 @@ function ChatPage() {
           if (!profile.onboarded) { router.replace('/onboarding'); return }
           if (profile.reminder_time) setReminderTime(profile.reminder_time)
         }
-        if (!cancelled) fetchSessions()
+        if (cancelled) return
+        fetchSessions()
+
+        // URL param ?session= handled by the separate session-param effect
+        if (sessionParam) return
+
+        // URL param ?mode= — opener loading effect handles it when showPicker=false
+        if (modeParam) return
+
+        // Check for active session in localStorage
+        const saved = lsGetSession()
+        if (saved) {
+          restoreSession(saved.id, saved.mode)
+          return
+        }
+
+        // No active session — show the picker
+        setShowPicker(true)
       } catch (err) {
         console.error('Init error:', err)
       }
     }
     initialize()
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, fetchSessions])
 
   // Textarea auto-resize
@@ -439,6 +478,29 @@ function ChatPage() {
     el.style.height = `${Math.min(el.scrollHeight, LINE_HEIGHT_PX * MAX_TEXTAREA_LINES)}px`
   }, [])
   useEffect(() => { resizeTextarea() }, [input, resizeTextarea])
+
+  // Restore session from localStorage
+  const restoreSession = useCallback(async (id: string, savedMode: SessionMode) => {
+    setLoadingSession(true)
+    openerRequestIdRef.current++
+    try {
+      const res = await fetch(`/api/sessions/${id}/messages`)
+      if (!res.ok) throw new Error('Failed to restore session')
+      const data = (await res.json()) as { role: MessageRole; content: string }[]
+      setMessages(data.map((m) => ({ role: m.role, content: m.content })))
+      setSessionId(id)
+      setMode(savedMode)
+      setShowPicker(false)
+      const draft = lsGetDraft(id)
+      if (draft) setInput(draft)
+    } catch (err) {
+      console.error('Restore session error:', err)
+      lsClearSession()
+      setShowPicker(true)
+    } finally {
+      setLoadingSession(false)
+    }
+  }, [])
 
   // Load opener
   const loadOpener = useCallback(async (sessionMode: SessionMode) => {
@@ -464,6 +526,8 @@ function ChatPage() {
   // Create new session (in-place)
   const createNewSession = useCallback(
     (newMode: SessionMode) => {
+      lsClearSession()
+      lsClearDraft(sessionId)
       setSessionId('')
       setMode(newMode)
       setMessages([])
@@ -475,13 +539,13 @@ function ChatPage() {
       setOpenerText(null)
       void loadOpener(newMode)
     },
-    [loadOpener]
+    [loadOpener, sessionId]
   )
 
   // Handle session picker selection
   const handlePickerSelect = useCallback(
     (selectedMode: SessionMode) => {
-      setPickerDismissed(true)
+      lsClearSession()
       setShowPicker(false)
       setMode(selectedMode)
       setOpenerText(null)
@@ -491,16 +555,29 @@ function ChatPage() {
     [loadOpener]
   )
 
-  // Load opener for initial mode (when coming from URL with mode=)
+  // Load opener when a mode is active and no messages exist yet
   const sessionParamRef = useRef(sessionParam)
   useEffect(() => {
-    if (sessionParamRef.current) return // will be handled by session load
+    if (sessionParamRef.current) return // handled by session-param effect
     if (sessionId) return
     if (messages.length > 0) return
-    if (!pickerDismissed) return
+    if (showPicker) return // wait until picker is dismissed
     void loadOpener(mode)
     return () => { openerRequestIdRef.current++ }
-  }, [mode, sessionId, messages.length, pickerDismissed, loadOpener])
+  }, [mode, sessionId, messages.length, showPicker, loadOpener])
+
+  // Draft auto-save: debounce 600ms, keyed by sessionId
+  useEffect(() => {
+    if (!sessionId) return
+    const timer = setTimeout(() => {
+      if (input) {
+        lsSaveDraft(sessionId, input)
+      } else {
+        lsClearDraft(sessionId)
+      }
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [input, sessionId])
 
   // Ensure DB session row
   const ensureSession = useCallback(
@@ -518,6 +595,7 @@ function ChatPage() {
         }
         setSessionId(id)
         setIsFirstSession(isFirst)
+        lsSaveSession(id, currentMode)
         return { id, isFirst }
       } catch (err) {
         console.error('Session create error:', err)
@@ -543,7 +621,9 @@ function ChatPage() {
         setMode(s.mode)
         setConfirmEnd(false)
         setSessionSaved(false)
-        setPickerDismissed(true)
+        lsSaveSession(s.id, s.mode)
+        const draft = lsGetDraft(s.id)
+        if (draft) setInput(draft)
       } catch (err) {
         console.error('Load session error:', err)
       } finally {
@@ -586,6 +666,8 @@ function ChatPage() {
       if (!extractRes.ok) throw new Error('Extraction failed')
 
       setSessionSaved(true)
+      lsClearSession()
+      lsClearDraft(sessionId)
       router.push('/home')
     } catch (err) {
       console.error('End session error:', err)
@@ -611,6 +693,7 @@ function ChatPage() {
     setMessages(nextMessages)
     if (currentOpener) setOpenerText(null)
     setInput('')
+    if (sessionId) lsClearDraft(sessionId)
     setIsLoading(true)
 
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
