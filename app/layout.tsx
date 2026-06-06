@@ -2,13 +2,14 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import { ClerkProvider } from '@clerk/nextjs'
 import { ServiceWorkerRegister } from '@/components/ServiceWorkerRegister'
+import { BottomNav } from '@/components/BottomNav'
 import './globals.css'
 
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'AI Mentor',
-  description: 'The only AI that remembers who you said you\'d be.',
+  description: "The only AI that remembers who you said you'd be.",
 }
 
 export default function RootLayout({
@@ -36,10 +37,17 @@ export default function RootLayout({
           />
           <meta name="apple-mobile-web-app-title" content="AI Mentor" />
           <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+
+          {/* Prevent double-tap zoom on mobile */}
+          <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+          />
         </head>
         <body className={inter.className}>
           <ServiceWorkerRegister />
           {children}
+          <BottomNav />
         </body>
       </html>
     </ClerkProvider>

@@ -6,10 +6,6 @@ const isPublicRoute = createRouteMatcher([
   '/',
   '/sign-in(.*)',
   '/sign-up(.*)',
-  // PWA manifest must be publicly fetchable. It ends in `.json`, which the
-  // config matcher does NOT exclude (that exclusion is `webmanifest` only), so
-  // without this Clerk redirects the manifest request to sign-in and Chrome
-  // marks the app "not installable" on Android/desktop.
   '/manifest.json',
 ])
 
@@ -20,14 +16,23 @@ const isOnboardingExempt = createRouteMatcher([
 ])
 
 export default clerkMiddleware(async (auth, request) => {
-  // Signed-in users skip the marketing landing page and go straight to the app.
-  // This also covers the PWA launch, whose start_url is "/".
-  if (request.nextUrl.pathname === '/') {
+  const { pathname } = request.nextUrl
+
+  // Signed-in users skip the landing page → go to /home
+  if (pathname === '/') {
     const { userId } = await auth()
     if (userId) {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
+      return NextResponse.redirect(new URL('/home', request.url))
     }
-    return // anonymous visitor → show the landing page
+    return
+  }
+
+  // /dashboard → /home redirect (backwards compat for any saved links)
+  if (pathname === '/dashboard') {
+    const { userId } = await auth()
+    if (userId) {
+      return NextResponse.redirect(new URL('/home', request.url))
+    }
   }
 
   if (isPublicRoute(request)) return
@@ -45,10 +50,7 @@ export default clerkMiddleware(async (auth, request) => {
   if (user?.onboarded) return
 
   if (request.nextUrl.pathname.startsWith('/api/')) {
-    return NextResponse.json(
-      { error: 'Onboarding required' },
-      { status: 403 }
-    )
+    return NextResponse.json({ error: 'Onboarding required' }, { status: 403 })
   }
 
   return NextResponse.redirect(new URL('/onboarding', request.url))

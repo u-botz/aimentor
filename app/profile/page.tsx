@@ -1,411 +1,642 @@
 'use client'
 
-import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
-import { ChevronLeft, X, Check } from 'lucide-react'
+import { useClerk } from '@clerk/nextjs'
+import {
+  Clock,
+  Sunrise,
+  Sliders,
+  Bell,
+  X,
+  Check,
+  Pencil,
+  ChevronRight,
+  LogOut,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { AppShell } from '@/components/AppShell'
 
-type CommunicationStyle = 'Direct' | 'Balanced' | 'Encouraging'
-
-const FEEDBACK_STYLES: CommunicationStyle[] = ['Direct', 'Balanced', 'Encouraging']
-
-type ProfileResponse = {
-  name?: string
-  age?: number | null
-  role?: string
-  primary_goal?: string
-  non_negotiables?: string[]
-  strictness?: number
-  communication_style?: string
-  reminder_time?: string | null
-  morning_time?: string | null
+type ProfileData = {
+  name: string
+  age: number | null
+  role: string
+  primary_goal: string
+  non_negotiables: string[]
+  strictness: number
+  communication_style: string
+  reminder_time: string | null
+  morning_time: string | null
 }
 
+const STRICTNESS_LABELS: Record<number, string> = {
+  1: 'Gentle',
+  2: 'Soft',
+  3: 'Balanced',
+  4: 'Strict',
+  5: 'Very strict',
+}
+
+// ─── Bottom sheet wrapper ─────────────────────────────────────────────────────
+
+function BottomSheet({
+  title,
+  onClose,
+  children,
+}: {
+  title: string
+  onClose: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end">
+      <div className="absolute inset-0 sheet-backdrop" onClick={onClose} />
+      <div className="animate-slide-up relative w-full rounded-t-3xl bg-[#141414] px-5 pt-3 pb-10">
+        <div className="mx-auto mb-4 h-1 w-8 rounded-full bg-[#2A2A2A]" />
+        <div className="mb-5 flex items-center justify-between">
+          <h3 className="text-[16px] font-bold text-[#F5F5F5]">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[#6B7280] hover:text-[#F5F5F5]"
+          >
+            <X size={20} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// ─── Chip component ───────────────────────────────────────────────────────────
+
+function Chip({ text, onRemove }: { text: string; onRemove?: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#2A2A2A] bg-[#1E1E1E] px-3 py-1.5 text-[13px] text-[#F5F5F5]">
+      {text}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="text-[#6B7280] hover:text-[#F5F5F5]"
+        >
+          <X size={12} />
+        </button>
+      )}
+    </span>
+  )
+}
+
+// ─── Setting row ──────────────────────────────────────────────────────────────
+
+function SettingRow({
+  icon: Icon,
+  label,
+  value,
+  onClick,
+  right,
+}: {
+  icon: React.ElementType
+  label: string
+  value?: string
+  onClick?: () => void
+  right?: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex w-full items-center gap-3 rounded-xl border border-[#2A2A2A] bg-[#141414] p-4 text-left',
+        onClick ? 'transition-colors hover:border-[#3A3A3A] active:scale-[0.98]' : 'cursor-default'
+      )}
+    >
+      <Icon size={18} className="shrink-0 text-[#6B7280]" />
+      <span className="flex-1 text-[15px] text-[#F5F5F5]">{label}</span>
+      {right ?? (
+        <>
+          {value && <span className="text-[14px] text-[#6B7280]">{value}</span>}
+          {onClick && <ChevronRight size={16} className="text-[#6B7280]" />}
+        </>
+      )}
+    </button>
+  )
+}
+
+// ─── Toggle ───────────────────────────────────────────────────────────────────
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        'relative h-6 w-10 rounded-full transition-colors duration-200',
+        checked ? 'bg-amber-400' : 'bg-[#2A2A2A]'
+      )}
+    >
+      <span
+        className={cn(
+          'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200',
+          checked ? 'translate-x-[18px]' : 'translate-x-0.5'
+        )}
+      />
+    </button>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
 export default function ProfilePage() {
+  const { signOut } = useClerk()
+
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const [name, setName] = useState('')
-  const [age, setAge] = useState('')
-  const [role, setRole] = useState('')
-  const [primaryGoal, setPrimaryGoal] = useState('')
-  const [ruleInput, setRuleInput] = useState('')
-  const [nonNegotiables, setNonNegotiables] = useState<string[]>([])
-  const [strictness, setStrictness] = useState(3)
-  const [communicationStyle, setCommunicationStyle] =
-    useState<CommunicationStyle>('Balanced')
-  const [reminderTime, setReminderTime] = useState('22:00')
-  const [morningTime, setMorningTime] = useState('08:00')
+  // Profile state
+  const [profile, setProfile] = useState<ProfileData>({
+    name: '',
+    age: null,
+    role: '',
+    primary_goal: '',
+    non_negotiables: [],
+    strictness: 3,
+    communication_style: 'Balanced',
+    reminder_time: '22:00',
+    morning_time: '08:00',
+  })
 
-  // ── Load current profile ──────────────────────────────────────────────────
+  // Sheet states
+  const [editGoalOpen, setEditGoalOpen] = useState(false)
+  const [editRulesOpen, setEditRulesOpen] = useState(false)
+  const [editReminderOpen, setEditReminderOpen] = useState(false)
+  const [editMorningOpen, setEditMorningOpen] = useState(false)
+  const [editStrictnessOpen, setEditStrictnessOpen] = useState(false)
+  const [signOutConfirm, setSignOutConfirm] = useState(false)
+
+  // Temp edit state
+  const [tempGoal, setTempGoal] = useState('')
+  const [tempRules, setTempRules] = useState<string[]>([])
+  const [tempRuleInput, setTempRuleInput] = useState('')
+  const [tempReminderTime, setTempReminderTime] = useState('22:00')
+  const [tempMorningTime, setTempMorningTime] = useState('08:00')
+  const [tempStrictness, setTempStrictness] = useState(3)
+  const [morningEnabled, setMorningEnabled] = useState(true)
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false)
+
+  // Load profile
   useEffect(() => {
     let cancelled = false
     fetch('/api/user/profile')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: ProfileResponse | null) => {
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: ProfileData | null) => {
         if (cancelled || !data) return
-        setName(data.name ?? '')
-        setAge(data.age != null ? String(data.age) : '')
-        setRole(data.role ?? '')
-        setPrimaryGoal(data.primary_goal ?? '')
-        setNonNegotiables(data.non_negotiables ?? [])
-        setStrictness(data.strictness ?? 3)
-        setCommunicationStyle(
-          (data.communication_style as CommunicationStyle) ?? 'Balanced'
-        )
-        setReminderTime(data.reminder_time ?? '22:00')
-        setMorningTime(data.morning_time ?? '08:00')
+        setProfile(data)
+        setMorningEnabled(!!data.morning_time)
+        // Check if notifications are enabled
+        if ('Notification' in window) {
+          setNotificationsEnabled(Notification.permission === 'granted')
+        }
       })
-      .catch((err) => {
-        console.error('Profile load error:', err)
-        setError('Could not load your profile.')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+      .catch(() => setError('Could not load profile.'))
+      .finally(() => { if (!cancelled) setLoading(false) })
     return () => {
       cancelled = true
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
     }
   }, [])
 
-  // ── Non-negotiables tag input ─────────────────────────────────────────────
-  const addRule = () => {
-    const trimmed = ruleInput.trim()
-    if (!trimmed || nonNegotiables.includes(trimmed)) return
-    setNonNegotiables((prev) => [...prev, trimmed])
-    setRuleInput('')
-  }
-
-  const removeRule = (rule: string) => {
-    setNonNegotiables((prev) => prev.filter((r) => r !== rule))
-  }
-
-  const handleRuleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      addRule()
-    }
-  }
-
-  const ageNum = Number(age)
-  const ageValid = age !== '' && ageNum >= 1 && ageNum <= 120
-
-  const canSave =
-    name.trim().length > 0 &&
-    ageValid &&
-    role.trim().length > 0 &&
-    primaryGoal.trim().length > 0 &&
-    nonNegotiables.length > 0 &&
-    reminderTime.length > 0 &&
-    morningTime.length > 0
-
-  // ── Save ──────────────────────────────────────────────────────────────────
-  const handleSave = async () => {
-    setError('')
-    setSaved(false)
-    if (!canSave) {
-      setError('Please fill in all fields before saving.')
-      return
-    }
+  const patchProfile = async (fields: Partial<ProfileData> & Record<string, unknown>) => {
     setSaving(true)
+    setError('')
     try {
       const res = await fetch('/api/user/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          age: Number(age),
-          role: role.trim(),
-          primary_goal: primaryGoal.trim(),
-          non_negotiables: nonNegotiables,
-          strictness,
-          communication_style: communicationStyle,
-          reminder_time: reminderTime,
-          morning_time: morningTime,
-        }),
+        body: JSON.stringify(fields),
       })
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error((body as { error?: string }).error ?? 'Save failed')
-      }
-
+      if (!res.ok) throw new Error('Save failed')
+      setProfile((prev) => ({ ...prev, ...fields } as ProfileData))
       setSaved(true)
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
-      savedTimerRef.current = setTimeout(() => setSaved(false), 2500)
-    } catch (err) {
-      console.error('Profile save error:', err)
+      savedTimerRef.current = setTimeout(() => setSaved(false), 2000)
+    } catch {
       setError('Something went wrong. Please try again.')
     } finally {
       setSaving(false)
     }
   }
 
+  const handleNotificationsToggle = async (enabled: boolean) => {
+    if (!enabled) {
+      setNotificationsEnabled(false)
+      return
+    }
+    try {
+      const perm = await Notification.requestPermission()
+      setNotificationsEnabled(perm === 'granted')
+    } catch {
+      setNotificationsEnabled(false)
+    }
+  }
+
   if (loading) {
     return (
-      <AppShell>
-        <div className="mx-auto w-full max-w-[480px] flex-1 p-5 animate-pulse">
-          <div className="mb-6 mt-2 h-8 w-1/3 rounded bg-zinc-800" />
-          <div className="mb-4 h-32 rounded-xl border border-zinc-800 bg-zinc-900/50" />
-          <div className="mb-4 h-24 rounded-xl border border-zinc-800 bg-zinc-900/50" />
-          <div className="h-40 rounded-xl border border-zinc-800 bg-zinc-900/50" />
-        </div>
-      </AppShell>
+      <div
+        className="animate-pulse px-5 pt-6 min-h-dvh bg-[#0A0A0A]"
+        style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
+      >
+        <div className="mb-6 h-8 w-32 rounded-lg bg-[#1E1E1E]" />
+        <div className="mb-3 h-4 w-48 rounded bg-[#1E1E1E]" />
+        <div className="mb-2 h-16 rounded-xl bg-[#1E1E1E]" />
+        <div className="mb-2 h-20 rounded-xl bg-[#1E1E1E]" />
+        <div className="mb-2 h-16 rounded-xl bg-[#1E1E1E]" />
+      </div>
     )
   }
 
   return (
-    <AppShell>
+    <div
+      className="animate-fade-in min-h-dvh bg-[#0A0A0A] text-[#F5F5F5]"
+      style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
+    >
       {/* Save toast */}
       {saved && (
-        <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
-          <Check className="h-4 w-4" />
-          Changes saved
+        <div className="fixed bottom-24 left-1/2 z-40 -translate-x-1/2 flex items-center gap-2 rounded-xl bg-[#10B981] px-4 py-2.5 text-[13px] font-semibold text-white shadow-lg">
+          <Check size={14} />
+          Saved
         </div>
       )}
 
-      <div className="mx-auto w-full max-w-[480px] flex-1 px-5 py-8">
-        {/* Header */}
-        <div className="mb-8 flex items-center gap-3 pl-8 md:pl-0">
-          <Link
-            href="/dashboard"
-            aria-label="Back to dashboard"
-            className="rounded-lg border border-zinc-800 p-2 text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Link>
-          <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>
-        </div>
+      <div className="px-5 pt-6 space-y-6">
+        {/* ── Page header ──────────────────────────────────────────────── */}
+        <h1 className="text-[24px] font-bold tracking-tight">Your profile</h1>
 
-        <div className="space-y-8">
-          {/* Basic info */}
-          <section className="space-y-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-[#2E5BFF]">
-              Basic info
-            </h2>
-            <div className="space-y-2">
-              <label htmlFor="profile-name" className="text-sm text-zinc-400">Name</label>
-              <input
-                id="profile-name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className={cn(
-                  'w-full rounded-lg border bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:ring-1',
-                  name.trim().length === 0
-                    ? 'border-red-500/70 focus:border-red-500 focus:ring-red-500'
-                    : 'border-zinc-800 focus:border-[#2E5BFF] focus:ring-[#2E5BFF]'
+        {error && (
+          <p className="rounded-xl bg-[rgba(239,68,68,0.1)] px-4 py-2 text-[13px] text-[#EF4444]">
+            {error}
+          </p>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════
+            SECTION 1 — What your mentor knows
+        ══════════════════════════════════════════════════════════════ */}
+        <section>
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-[#6B7280]">
+            What your mentor knows
+          </p>
+          <div className="space-y-2.5">
+
+            {/* Goal card */}
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#141414] p-4">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[12px] text-[#6B7280]">Your goal</span>
+                <button
+                  type="button"
+                  onClick={() => { setTempGoal(profile.primary_goal); setEditGoalOpen(true) }}
+                  className="text-[#6B7280] hover:text-[#F5F5F5]"
+                >
+                  <Pencil size={14} />
+                </button>
+              </div>
+              <p className="text-[15px] leading-snug text-[#F5F5F5]">
+                {profile.primary_goal || (
+                  <span className="italic text-[#6B7280]">Not set yet.</span>
                 )}
-              />
-              {name.trim().length === 0 && (
-                <p className="text-xs text-red-400">Name is required.</p>
+              </p>
+            </div>
+
+            {/* Non-negotiables card */}
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#141414] p-4">
+              <div className="mb-2.5 flex items-center justify-between">
+                <span className="text-[12px] text-[#6B7280]">Your rules</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTempRules([...profile.non_negotiables])
+                    setTempRuleInput('')
+                    setEditRulesOpen(true)
+                  }}
+                  className="text-[#6B7280] hover:text-[#F5F5F5]"
+                >
+                  <Pencil size={14} />
+                </button>
+              </div>
+              {profile.non_negotiables.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {profile.non_negotiables.map((rule) => (
+                    <Chip key={rule} text={rule} />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[13px] italic text-[#6B7280]">No rules set yet.</p>
               )}
             </div>
-            <div className="space-y-2">
-              <label htmlFor="profile-age" className="text-sm text-zinc-400">Age</label>
-              <input
-                id="profile-age"
-                type="number"
-                value={age}
-                onChange={(e) => setAge(e.target.value)}
-                className={cn(
-                  'w-full rounded-lg border bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:ring-1',
-                  age !== '' && !ageValid
-                    ? 'border-red-500/70 focus:border-red-500 focus:ring-red-500'
-                    : 'border-zinc-800 focus:border-[#2E5BFF] focus:ring-[#2E5BFF]'
-                )}
-              />
-              {age !== '' && !ageValid && (
-                <p className="text-xs text-red-400">Age must be between 1 and 120.</p>
-              )}
-            </div>
-            <label className="block space-y-2">
-              <span className="text-sm text-zinc-400">Current role</span>
-              <input
-                type="text"
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-                placeholder="e.g. Product Manager"
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none placeholder:text-zinc-600 focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF]"
-              />
-            </label>
-          </section>
 
-          {/* Goal */}
-          <section className="space-y-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-[#2E5BFF]">
-              Your goal
-            </h2>
-            <textarea
-              value={primaryGoal}
-              onChange={(e) => setPrimaryGoal(e.target.value)}
-              rows={4}
-              placeholder="Describe your top priority..."
-              className="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-3 text-sm leading-relaxed outline-none placeholder:text-zinc-600 focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF]"
+            {/* Patterns card — grows over time from memory extraction */}
+            <div
+              className="rounded-xl border border-[#2A2A2A] bg-transparent p-4"
+              style={{ borderLeft: '3px solid #0D9488' }}
+            >
+              <p className="mb-1 text-[12px] text-[#6B7280]">What your mentor has noticed</p>
+              <p className="text-[11px] text-[#6B7280]/60">
+                These build over time as you keep showing up.
+              </p>
+              <p className="mt-2 text-[13px] italic leading-relaxed text-[#6B7280]">
+                Your mentor is still learning your patterns. Keep showing up.
+              </p>
+            </div>
+
+          </div>
+        </section>
+
+        {/* ══════════════════════════════════════════════════════════════
+            SECTION 2 — Settings
+        ══════════════════════════════════════════════════════════════ */}
+        <section>
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-[#6B7280]">
+            Settings
+          </p>
+          <div className="space-y-2">
+
+            {/* Reminder time */}
+            <SettingRow
+              icon={Clock}
+              label="Reminder time"
+              value={profile.reminder_time ?? '—'}
+              onClick={() => {
+                setTempReminderTime(profile.reminder_time ?? '22:00')
+                setEditReminderOpen(true)
+              }}
             />
-          </section>
 
-          {/* Non-negotiables */}
-          <section className="space-y-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-[#2E5BFF]">
-              Your rules
-            </h2>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={ruleInput}
-                onChange={(e) => setRuleInput(e.target.value)}
-                onKeyDown={handleRuleKeyDown}
-                placeholder="Type a rule and press Enter"
-                className="flex-1 rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none placeholder:text-zinc-600 focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF]"
-              />
+            {/* Morning check-in */}
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#141414] p-4">
+              <div className="flex items-center gap-3">
+                <Sunrise size={18} className="shrink-0 text-[#6B7280]" />
+                <span className="flex-1 text-[15px] text-[#F5F5F5]">Morning check-in</span>
+                <Toggle
+                  checked={morningEnabled}
+                  onChange={(v) => {
+                    setMorningEnabled(v)
+                    if (!v) patchProfile({ morning_time: null })
+                  }}
+                />
+              </div>
+              {morningEnabled && (
+                <div className="mt-3 pl-[30px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTempMorningTime(profile.morning_time ?? '08:00')
+                      setEditMorningOpen(true)
+                    }}
+                    className="flex items-center gap-2 text-[14px] text-amber-400 hover:text-amber-300"
+                  >
+                    {profile.morning_time ?? '08:00'}
+                    <Pencil size={12} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Mentor strictness */}
+            <SettingRow
+              icon={Sliders}
+              label="Strictness"
+              value={`${profile.strictness} — ${STRICTNESS_LABELS[profile.strictness] ?? ''}`}
+              onClick={() => {
+                setTempStrictness(profile.strictness)
+                setEditStrictnessOpen(true)
+              }}
+            />
+
+            {/* Notifications */}
+            <SettingRow
+              icon={Bell}
+              label="Notifications"
+              right={
+                <Toggle
+                  checked={notificationsEnabled}
+                  onChange={handleNotificationsToggle}
+                />
+              }
+            />
+
+          </div>
+        </section>
+
+        {/* ── Footer ──────────────────────────────────────────────────── */}
+        <div className="pt-2">
+          <p className="mb-4 text-center text-[12px] text-[#6B7280]/50">AI Mentor v1.0</p>
+
+          {signOutConfirm ? (
+            <div className="flex items-center justify-center gap-3">
+              <span className="text-[14px] text-[#6B7280]">Sign out?</span>
               <button
                 type="button"
-                onClick={addRule}
-                disabled={!ruleInput.trim()}
-                className="shrink-0 rounded-lg bg-[#2E5BFF] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#2548d4] disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={() => signOut({ redirectUrl: '/' })}
+                className="rounded-lg bg-[#EF4444]/15 px-4 py-2 text-[14px] font-medium text-[#EF4444]"
               >
-                Add
+                Yes, sign out
+              </button>
+              <button
+                type="button"
+                onClick={() => setSignOutConfirm(false)}
+                className="rounded-lg border border-[#2A2A2A] px-4 py-2 text-[14px] text-[#6B7280]"
+              >
+                Cancel
               </button>
             </div>
-            {nonNegotiables.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {nonNegotiables.map((rule) => (
-                  <span
-                    key={rule}
-                    className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-zinc-700/50 bg-[#1a1a2e] px-3 py-1.5 text-sm"
-                  >
-                    {rule}
-                    <button
-                      type="button"
-                      onClick={() => removeRule(rule)}
-                      aria-label={`Remove ${rule}`}
-                      className="text-zinc-500 hover:text-zinc-300"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-zinc-600">
-                Add at least one non-negotiable rule.
-              </p>
-            )}
-          </section>
-
-          {/* Mentor tone */}
-          <section className="space-y-5">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-[#2E5BFF]">
-              Mentor tone
-            </h2>
-            <div className="space-y-4">
-              <span className="text-sm text-zinc-400">Strictness</span>
-              <input
-                type="range"
-                min={1}
-                max={5}
-                step={1}
-                value={strictness}
-                onChange={(e) => setStrictness(Number(e.target.value))}
-                className="w-full accent-[#2E5BFF]"
-              />
-              <div className="flex justify-between text-xs text-zinc-500">
-                <span className={cn(strictness === 1 && 'text-[#2E5BFF]')}>
-                  Gentle
-                </span>
-                <span className={cn(strictness === 3 && 'text-[#2E5BFF]')}>
-                  Balanced
-                </span>
-                <span className={cn(strictness === 5 && 'text-[#2E5BFF]')}>
-                  Very strict
-                </span>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <span className="text-sm text-zinc-400">Feedback style</span>
-              <div className="grid grid-cols-3 gap-2">
-                {FEEDBACK_STYLES.map((style) => (
-                  <button
-                    key={style}
-                    type="button"
-                    onClick={() => setCommunicationStyle(style)}
-                    className={cn(
-                      'rounded-lg border px-2 py-2.5 text-sm font-medium transition-colors',
-                      communicationStyle === style
-                        ? 'border-[#2E5BFF] bg-[#2E5BFF]/15 text-[#2E5BFF]'
-                        : 'border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
-                    )}
-                  >
-                    {style}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          {/* Check-in times */}
-          <section className="space-y-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-[#2E5BFF]">
-              Check-in times
-            </h2>
-            <label className="block space-y-2">
-              <span className="text-sm text-zinc-400">Morning check-in time</span>
-              <input
-                type="time"
-                value={morningTime}
-                onChange={(e) => setMorningTime(e.target.value)}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF] [color-scheme:dark]"
-              />
-            </label>
-            <label className="block space-y-2">
-              <span className="text-sm text-zinc-400">Nightly debrief time</span>
-              <input
-                type="time"
-                value={reminderTime}
-                onChange={(e) => setReminderTime(e.target.value)}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-sm outline-none focus:border-[#2E5BFF] focus:ring-1 focus:ring-[#2E5BFF] [color-scheme:dark]"
-              />
-            </label>
-          </section>
-
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSignOutConfirm(true)}
+              className="flex w-full items-center justify-center gap-2 py-2 text-[14px] font-medium text-[#EF4444] hover:text-[#EF4444]/80 transition-colors"
+            >
+              <LogOut size={15} />
+              Sign out
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Sticky save bar */}
-      <div className="sticky bottom-0 border-t border-zinc-800/60 bg-[#0a0a0f]/95 backdrop-blur">
-        <div className="mx-auto w-full max-w-[480px] px-5 py-4">
+      {/* ════════════════════════════════════════════════════════════════
+          BOTTOM SHEETS
+      ════════════════════════════════════════════════════════════════ */}
+
+      {/* Edit goal */}
+      {editGoalOpen && (
+        <BottomSheet title="Edit goal" onClose={() => setEditGoalOpen(false)}>
+          <textarea
+            value={tempGoal}
+            onChange={(e) => setTempGoal(e.target.value)}
+            rows={4}
+            placeholder="Describe your top priority…"
+            className="w-full resize-none rounded-xl border border-[#2A2A2A] bg-[#1E1E1E] px-4 py-3 text-[15px] leading-relaxed text-[#F5F5F5] outline-none placeholder:text-[#6B7280] focus:border-amber-400/40"
+          />
           <button
             type="button"
-            onClick={handleSave}
-            disabled={saving || !canSave}
-            className={cn(
-              'flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-medium text-white transition-all',
-              saved
-                ? 'bg-emerald-600 hover:bg-emerald-600'
-                : 'bg-[#2E5BFF] hover:bg-[#2548d4]',
-              'disabled:cursor-not-allowed disabled:opacity-40'
-            )}
+            disabled={saving}
+            onClick={() => {
+              patchProfile({ primary_goal: tempGoal.trim() })
+              setEditGoalOpen(false)
+            }}
+            className="mt-4 w-full rounded-xl bg-amber-400 py-3.5 text-[15px] font-semibold text-black disabled:opacity-50"
           >
-            {saved ? (
-              <>
-                <Check className="h-4 w-4" />
-                Saved
-              </>
-            ) : saving ? (
-              'Saving...'
-            ) : (
-              'Save changes'
-            )}
+            {saving ? 'Saving…' : 'Save'}
           </button>
-        </div>
-      </div>
-    </AppShell>
+        </BottomSheet>
+      )}
+
+      {/* Edit rules */}
+      {editRulesOpen && (
+        <BottomSheet title="Edit rules" onClose={() => setEditRulesOpen(false)}>
+          <div className="flex gap-2 mb-3">
+            <input
+              type="text"
+              value={tempRuleInput}
+              onChange={(e) => setTempRuleInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && tempRuleInput.trim()) {
+                  e.preventDefault()
+                  if (!tempRules.includes(tempRuleInput.trim())) {
+                    setTempRules((prev) => [...prev, tempRuleInput.trim()])
+                  }
+                  setTempRuleInput('')
+                }
+              }}
+              placeholder="Add a rule, press Enter"
+              className="flex-1 rounded-xl border border-[#2A2A2A] bg-[#1E1E1E] px-3 py-2.5 text-[14px] text-[#F5F5F5] outline-none placeholder:text-[#6B7280] focus:border-amber-400/40"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (tempRuleInput.trim() && !tempRules.includes(tempRuleInput.trim())) {
+                  setTempRules((prev) => [...prev, tempRuleInput.trim()])
+                  setTempRuleInput('')
+                }
+              }}
+              className="rounded-xl bg-amber-400 px-4 py-2.5 text-[14px] font-semibold text-black disabled:opacity-40"
+              disabled={!tempRuleInput.trim()}
+            >
+              Add
+            </button>
+          </div>
+          {tempRules.length > 0 && (
+            <div className="mb-4 flex flex-wrap gap-2">
+              {tempRules.map((rule) => (
+                <Chip
+                  key={rule}
+                  text={rule}
+                  onRemove={() => setTempRules((prev) => prev.filter((r) => r !== rule))}
+                />
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => {
+              patchProfile({ non_negotiables: tempRules })
+              setEditRulesOpen(false)
+            }}
+            className="w-full rounded-xl bg-amber-400 py-3.5 text-[15px] font-semibold text-black disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save rules'}
+          </button>
+        </BottomSheet>
+      )}
+
+      {/* Edit reminder time */}
+      {editReminderOpen && (
+        <BottomSheet title="Reminder time" onClose={() => setEditReminderOpen(false)}>
+          <p className="mb-3 text-[13px] text-[#6B7280]">
+            When should your mentor remind you to do your nightly debrief?
+          </p>
+          <input
+            type="time"
+            value={tempReminderTime}
+            onChange={(e) => setTempReminderTime(e.target.value)}
+            className="w-full rounded-xl border border-[#2A2A2A] bg-[#1E1E1E] px-4 py-3 text-[15px] text-[#F5F5F5] outline-none focus:border-amber-400/40 [color-scheme:dark]"
+          />
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => {
+              patchProfile({ reminder_time: tempReminderTime })
+              setEditReminderOpen(false)
+            }}
+            className="mt-4 w-full rounded-xl bg-amber-400 py-3.5 text-[15px] font-semibold text-black disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </BottomSheet>
+      )}
+
+      {/* Edit morning time */}
+      {editMorningOpen && (
+        <BottomSheet title="Morning check-in time" onClose={() => setEditMorningOpen(false)}>
+          <p className="mb-3 text-[13px] text-[#6B7280]">
+            When should your morning check-in reminder arrive?
+          </p>
+          <input
+            type="time"
+            value={tempMorningTime}
+            onChange={(e) => setTempMorningTime(e.target.value)}
+            className="w-full rounded-xl border border-[#2A2A2A] bg-[#1E1E1E] px-4 py-3 text-[15px] text-[#F5F5F5] outline-none focus:border-amber-400/40 [color-scheme:dark]"
+          />
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => {
+              patchProfile({ morning_time: tempMorningTime })
+              setEditMorningOpen(false)
+            }}
+            className="mt-4 w-full rounded-xl bg-amber-400 py-3.5 text-[15px] font-semibold text-black disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </BottomSheet>
+      )}
+
+      {/* Edit strictness */}
+      {editStrictnessOpen && (
+        <BottomSheet title="Mentor strictness" onClose={() => setEditStrictnessOpen(false)}>
+          <p className="mb-4 text-center text-[24px] font-bold text-amber-400">
+            {tempStrictness} — {STRICTNESS_LABELS[tempStrictness]}
+          </p>
+          <input
+            type="range"
+            min={1}
+            max={5}
+            step={1}
+            value={tempStrictness}
+            onChange={(e) => setTempStrictness(Number(e.target.value))}
+            className="w-full"
+          />
+          <div className="mt-2 flex justify-between text-[11px] text-[#6B7280]">
+            <span>Gentle</span>
+            <span>Balanced</span>
+            <span>Very strict</span>
+          </div>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => {
+              patchProfile({ strictness: tempStrictness })
+              setEditStrictnessOpen(false)
+            }}
+            className="mt-5 w-full rounded-xl bg-amber-400 py-3.5 text-[15px] font-semibold text-black disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </BottomSheet>
+      )}
+    </div>
   )
 }

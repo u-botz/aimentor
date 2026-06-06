@@ -143,11 +143,20 @@ export async function GET(req: Request) {
 
     const todaysPriority = validLogs.length > 0 ? validLogs[0].tomorrow_priority : null
 
+    const todayScore = debriefedToday ? (validLogs[0]?.score_overall ?? null) : null
+
     const last7DaysLogs = validLogs.slice(0, 7).reverse()
     const recentScores = last7DaysLogs.map(log => ({
       date: log.debrief_date,
       score: log.score_overall ?? 0
     }))
+
+    // Last 7 calendar days status (for streak dots on home screen)
+    const completedDates = new Set(validLogs.map(l => l.debrief_date))
+    const last7DaysStatus = Array.from({ length: 7 }, (_, i) => {
+      const date = shiftDateString(todayStr, -i)
+      return { date, completed: completedDates.has(date) }
+    }).reverse()
 
     // Average only days that actually produced a score, so a debrief logged
     // without an inferred score doesn't drag the average down to zero.
@@ -181,6 +190,8 @@ export async function GET(req: Request) {
       recentScores,
       weeklyAverage,
       todaysPriority,
+      todayScore,
+      last7DaysStatus,
       openCommitments,
       totalDebriefs: validLogs.length,
       longestStreak,
