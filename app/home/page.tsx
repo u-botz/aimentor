@@ -13,6 +13,10 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
+import { supabase } from '@/lib/supabase/client'
+
+// IMPORTANT: Enable realtime for mentor_tasks table in Supabase Dashboard
+// → Database → Replication → mentor_tasks → toggle ON.
 
 type Period = 'morning' | 'day' | 'evening'
 
@@ -121,6 +125,56 @@ export default function HomePage() {
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  // ── Supabase realtime — new tasks from the mentor appear on the home preview
+  useEffect(() => {
+    const userId = user?.id
+    if (!userId) return
+
+    const channel = supabase
+      .channel('home-page-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'mentor_tasks',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          const row = payload.new as {
+            id: string
+            title: string
+            context: string | null
+            status: string
+            due_date: string | null
+            source_mode: string | null
+            source_date: string | null
+          }
+          if (row.status !== 'open') return
+          const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+          const newTask: Task = {
+            id: row.id,
+            title: row.title,
+            context: row.context ?? null,
+            status: 'open',
+            due_date: row.due_date ?? null,
+            source_mode: row.source_mode ?? null,
+            source_date: row.source_date ?? null,
+            is_overdue: !!row.due_date && row.due_date < today,
+          }
+          setTasks((prev) => {
+            if (prev.some((t) => t.id === newTask.id)) return prev
+            return [newTask, ...prev]
+          })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user?.id])
 
   // Pull-to-refresh
   const onTouchStart = (e: React.TouchEvent) => {

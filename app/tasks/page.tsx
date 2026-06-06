@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { CheckCircle2 } from 'lucide-react'
+import { useUser } from '@clerk/nextjs'
 import { cn } from '@/lib/utils'
+import { supabase } from '@/lib/supabase/client'
+
+// IMPORTANT: Enable realtime for mentor_tasks table in Supabase Dashboard
+// → Database → Replication → mentor_tasks → toggle ON.
 
 type Task = {
   id: string
@@ -197,9 +202,12 @@ function EmptyState({ filter }: { filter: Filter }) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function TasksPage() {
+  const { user } = useUser()
   const [allTasks, setAllTasks] = useState<Task[]>([])
   const [filter, setFilter] = useState<Filter>('open')
   const [loading, setLoading] = useState(true)
+  // Toast: shows "New task assigned by mentor" for 3s when a task arrives live
+  const [toast, setToast] = useState<string | null>(null)
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -217,6 +225,70 @@ export default function TasksPage() {
   useEffect(() => {
     fetchTasks()
   }, [fetchTasks])
+
+  // ── Supabase realtime — new tasks from the mentor appear instantly ──────────
+  useEffect(() => {
+    const userId = user?.id
+    if (!userId) return
+
+    const channel = supabase
+      .channel('tasks-page-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'mentor_tasks',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          const row = payload.new as {
+            id: string
+            title: string
+            context: string | null
+            status: string
+            due_date: string | null
+            source_mode: string | null
+            source_date: string | null
+            completed_at: string | null
+          }
+          const today = todayIST()
+          const newTask: Task = {
+            id: row.id,
+            title: row.title,
+            context: row.context ?? null,
+            status: row.status as 'open' | 'completed',
+            due_date: row.due_date ?? null,
+            source_mode: row.source_mode ?? null,
+            source_date: row.source_date ?? null,
+            is_overdue:
+              row.status === 'open' &&
+              !!row.due_date &&
+              row.due_date < today,
+            completed_at: row.completed_at ?? null,
+          }
+          // Prepend so newest appears at the top of the open list
+          setAllTasks((prev) => {
+            // Guard against duplicates (e.g. optimistic + realtime)
+            if (prev.some((t) => t.id === newTask.id)) return prev
+            return [newTask, ...prev]
+          })
+          setToast('New task assigned by mentor')
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user?.id])
+
+  // Auto-dismiss toast after 3 seconds
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 3000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   const handleComplete = async (taskId: string) => {
     // Optimistic update
@@ -239,7 +311,6 @@ export default function TasksPage() {
     }
   }
 
-  const today = todayIST()
   const openTasks    = allTasks.filter((t) => t.status === 'open' && !t.is_overdue)
   const overdueTasks = allTasks.filter((t) => t.status === 'open' && t.is_overdue)
   const completedTasks = allTasks.filter((t) => t.status === 'completed')
@@ -321,6 +392,14 @@ export default function TasksPage() {
         )}
 
       </div>
+
+      {/* ── "New task" toast ─────────────────────────────────────────────── */}
+      {toast && (
+        <div className="fixed bottom-24 left-1/2 z-40 -translate-x-1/2 whitespace-nowrap flex items-center gap-2 rounded-xl bg-[#141414] border border-amber-400/30 px-4 py-2.5 text-[13px] font-semibold text-amber-400 shadow-lg">
+          <CheckCircle2 size={14} />
+          {toast}
+        </div>
+      )}
     </div>
   )
 }

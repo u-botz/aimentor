@@ -6,6 +6,10 @@ import { useUser } from '@clerk/nextjs'
 import { Home, MessageCircle, CheckSquare, User } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { supabase } from '@/lib/supabase/client'
+
+// IMPORTANT: Enable realtime for mentor_tasks table in Supabase Dashboard
+// → Database → Replication → mentor_tasks → toggle ON.
 
 const HIDDEN_ROUTES = new Set(['/', '/onboarding'])
 
@@ -26,7 +30,7 @@ const TABS: Tab[] = [
 
 export function BottomNav() {
   const pathname = usePathname()
-  const { isSignedIn, isLoaded } = useUser()
+  const { isSignedIn, isLoaded, user } = useUser()
   const [openCount, setOpenCount] = useState(0)
 
   // Fetch open task count (refetch on route change so badge stays fresh)
@@ -37,6 +41,53 @@ export function BottomNav() {
       .then((d) => setOpenCount(d.tasks?.length ?? 0))
       .catch(() => {})
   }, [isSignedIn, pathname])
+
+  // Realtime: update badge count the moment a new task is assigned or completed
+  useEffect(() => {
+    const userId = user?.id
+    if (!userId) return
+
+    const channel = supabase
+      .channel('bottom-nav-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'mentor_tasks',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          const row = payload.new as { status: string }
+          if (row.status === 'open') {
+            setOpenCount((prev) => prev + 1)
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'mentor_tasks',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          const oldStatus = (payload.old as { status?: string }).status
+          const newStatus = (payload.new as { status: string }).status
+          if (oldStatus === 'open' && newStatus === 'completed') {
+            setOpenCount((prev) => Math.max(0, prev - 1))
+          } else if (oldStatus === 'completed' && newStatus === 'open') {
+            setOpenCount((prev) => prev + 1)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user?.id])
 
   // Determine whether nav should be visible
   const shouldHide =

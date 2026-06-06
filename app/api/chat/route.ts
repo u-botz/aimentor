@@ -7,6 +7,7 @@ import { rewriteMemory } from '@/lib/memory/rewrite'
 import { MORNING_PRIORITY_EXTRACT_PROMPT } from '@/lib/prompts/layer4-mode'
 import { istDateString } from '@/lib/date'
 import { runBuilderSweep } from '@/lib/memory/builder'
+import { detectAndCreateTask } from '@/lib/tasks/detect-task'
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string }
 
@@ -246,6 +247,13 @@ export async function POST(req: Request) {
           [...messages, { role: 'assistant', content: fullResponse }],
           { live: true }
         ).catch((err) => console.error('[builder live]', err))
+
+        // Detect and immediately persist any task the mentor just assigned.
+        // Fire-and-forget: client gets the streamed response first; the task
+        // row lands in the DB ~1s later and the UI picks it up via Supabase
+        // realtime without needing a manual refresh.
+        void detectAndCreateTask(fullResponse, sessionId, userId, mode)
+          .catch((err) => console.error('[task-detect fire-and-forget]', err))
       },
     })
 
